@@ -146,7 +146,7 @@ for SAMPLE_SIZE in $SAMPLE_SIZES; do
             exit 1
         fi
 
-        if ! cp -r coverage.json "${BNAME}.json" &> "$OUT"; then
+        if ! cp coverage.json "${BNAME}.json" &> "$OUT"; then
             echo "Error: Failed to copy coverage json report."
             exit 1
         fi
