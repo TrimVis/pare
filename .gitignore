@@ -1,3 +1,6 @@
 /benchmarks/
 /benchmark_runs/
+/venv/
+*.json
+*.csv
 
