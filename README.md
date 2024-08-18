@@ -10,7 +10,7 @@
 ## Setup
 ### Automated Coverage Runs
  1. Clone cvc5-repo
- 2. Prepare it for coverage testing (`./configure debug --coverage && cd build && make`)
+ 2. Prepare it for coverage testing (`./configure debug --auto-download --coverage && cd build && make`)
  3. Download benchmarks used for coverage evaluation later on. E.g.:
     - [SMT-LIB Non-Incremental Benchmark 2024](https://zenodo.org/records/11061097)
     - [SMT-LIB Incremental Benchmark 2024](https://zenodo.org/records/11186591)
