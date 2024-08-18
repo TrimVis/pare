@@ -1,2 +1,5 @@
 fire
 orjson
+pandas
+plotnine
+loguru
