@@ -23,7 +23,7 @@
 ### Automated Coverage Runs
 `benchmark_coverage.sh` is a helper script that will run various benchmarks and create coverage tests on random subset of all given benchmarks.
 
-An example execution could look like the following command:
+An example execution could look like the following command:<br/>
 `./benchmark_coverage.sh -n "all" -j 64 -b ../cvc5-repo/build/ -a "--tlimit 10000" ./benchmarks/nonincremental_2024.04.23/non-incremental/ ./benchmark_runs/tlimit10000-trace/`
 
 *Command Breakdown*
@@ -43,27 +43,27 @@ An example execution could look like the following command:
 It provides commands to generate CSV files which can then potentially be used later on, as well as some plots for visualization purposes.
 
 > *Arguments*
-> Note: Not all of these arguments are available for all sub-commands.
-> More arguments are available, check out --help for more information
+> Note: Not all of these arguments are available for all sub-commands.<br/>
+> More arguments are available, check out --help for more information<br/>
 >
-> `--input=./coverage.json` The coverage.json file created by `make coverage-json`
-> `--output=./out.csv`      Output file
-> `--src_code=../cvc5-repo/src`    Path to src code folder of the cvc5-repo
-> `--cutoff=x`    Filter out any usage values <= x
-> `--log_scale`   (plot only) Use a log10 scale for the y-axis
+> `--input=./coverage.json` The coverage.json file created by `make coverage-json`<br/>
+> `--output=./out.csv`      Output file<br/>
+> `--src_code=../cvc5-repo/src`    Path to src code folder of the cvc5-repo<br/>
+> `--cutoff=x`    Filter out any usage values <= x<br/>
+> `--log_scale`   (plot only) Use a log10 scale for the y-axis<br/>
 > `--relevance_filter=0.1`   (functions-lines only) Filter out functions for which the line by line change is never smaller than 0.1
 
 
 #### Functions
-CSV Example: `python parse_coverage_json.py func_usage csv --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --output out_func.csv`
+CSV Example: `python parse_coverage_json.py func_usage csv --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --output out_func.csv`<br/>
 Plot Example: `python parse_coverage_json.py func_usage plot --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --log_scale`
 
 #### Lines
-CSV Example: `python parse_coverage_json.py line_usage csv --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --output out_lines.csv`
+CSV Example: `python parse_coverage_json.py line_usage csv --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --output out_lines.csv`<br/>
 Plot Example: `python parse_coverage_json.py line_usage plot --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --log_scale`
 
 #### Function Lines
-CSV Example: `python parse_coverage_json.py fline_usage csv --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --output out_func_lines.csv`
+CSV Example: `python parse_coverage_json.py fline_usage csv --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --output out_func_lines.csv`<br/>
 Plot Example: `python parse_coverage_json.py fline_usage plot --input=./coverage.json --src_code=../cvc5-repo/src/ --cutoff 0 --log_scale --relevance_filter 0.1`
 
 
