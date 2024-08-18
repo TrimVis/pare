@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import fire
 import orjson
 import csv
