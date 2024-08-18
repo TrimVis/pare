@@ -128,26 +128,21 @@ class FuncAnalyzer:
         colors = ['red', 'green', 'blue', 'purple', 'magenta']
         quantiles_s = [0.999, 0.99, 0.95, 0.90]
         logger.info(f"Creating quantile lines ({[f'{100*q}%' for q in quantiles_s]})")
-        quantiles = df['exec_count'].quantile(quantiles_s)
+        quantiles = pd.DataFrame({
+            'Percentile': [f'{100*q} Percentile' for q in quantiles_s],
+            'y': df['exec_count'].quantile(quantiles_s),
+            'color': ['red', 'green', 'blue', 'purple', 'magenta'][:len(quantiles_s)]
+        })
 
         logger.info(f"Creating plot")
         plot = (
             ggplot(df_combined, aes(x=df_combined.index, y='exec_count')) +
-            geom_point(color="steelblue")
-        )
-        for (i, l) in enumerate(quantiles_s):
-            color = colors[i]
-            plot = ( 
-                    plot 
-                    + geom_hline(yintercept=quantiles[l], linetype="dashed", color=color, size=1) 
-                    + annotate('text', x=5, y=quantiles[l] + 5, label=f"{100*l} Percentile", color=color, ha='left')
-            )
-
-        plot = (
-            plot
-            + facet_wrap('~category', scales='free_x')
-            + theme_minimal()
-            + labs(title="Distribution of Function Accesses", x="Index", y="Execution Count")
+            geom_point(color="steelblue") +
+            geom_hline(quantiles, aes(yintercept='y', color='Percentile'), linetype="dashed", size=1) +
+            facet_wrap('~category', scales='free_x') +
+            theme_minimal() +
+            labs(title="Distribution of Function Accesses", x="Index", y="Execution Count") +
+            scale_color_manual(values=dict(zip(quantiles['Percentile'], quantiles['color'])))
         )
 
         if output:
