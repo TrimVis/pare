@@ -117,38 +117,76 @@ cd "$BUILD_DIR" || {
 
 IFS=','
 for SAMPLE_SIZE in $SAMPLE_SIZES; do
-    echo "$SAMPLE_SIZE"
     for ((r = START_NO; r <= NO_RUNS; r++)); do
-        echo "$r"
-        BNAME="${OUT_DIR}/s${SAMPLE_SIZE}_${r}"
         CMD="${BUILD_DIR}/bin/cvc5 $ARGS"
+        BNAME="${OUT_DIR}/s${SAMPLE_SIZE}_${r}"
 
         echo -e "[$(date -u "+%Y-%m-%d %H:%M:%S")] Sample Size: ${SAMPLE_SIZE} \tArgs: $ARGS \trun: $r/$NO_RUNS"
 
-        if ! make coverage-reset &> "$OUT"; then
-            echo "Error: Failed to reset coverage."
-            exit 1
-        fi
+        if [ "$SAMPLE_SIZE" = "each" ]; then
+            # 'each' case, creates coverage-json for each file (skips html for time reasons)
+            BBASE="${BNAME}"
+            mkdir -p "$BBASE"
 
-        "${SCRIPTS}/run_benchmark.sh" \
-            -n "$SAMPLE_SIZE" -j "$PARALLELIZE" -b "$BENCH_DIR" \
-            -c "$CMD" | tee "${BNAME}.log"
+            unset IFS
+            FILES=$("${SCRIPTS}/file_samples.sh" --sample-size "all" --benchmark-dir "$BENCH_DIR")
 
-        # This depends on "make coverage-json", so the 
-        # coverage.json file will also be generated
-        if ! make coverage &> "$OUT"; then
-            echo "Error: Failed to generate coverage."
-            exit 1
-        fi
+            for file in $FILES; do
+                SHORT_FILE_NAME="${file#"$BENCH_DIR"}"
+                SANITIZED_FILE_NAME="${SHORT_FILE_NAME//\//_}"
+                BNAME="${BBASE}/${SANITIZED_FILE_NAME}"
 
-        if ! cp -r coverage "${BNAME}_report" &> "$OUT"; then
-            echo "Error: Failed to copy coverage HTML report."
-            exit 1
-        fi
+                echo -e "[$(date -u "+%Y-%m-%d %H:%M:%S")] File: ${SHORT_FILE_NAME}"
 
-        if ! cp coverage.json "${BNAME}.json" &> "$OUT"; then
-            echo "Error: Failed to copy coverage json report."
-            exit 1
+                if ! make coverage-reset &>"$OUT"; then
+                    echo "Error: Failed to reset coverage."
+                    exit 1
+                fi
+
+                start_time=$(date +%s%3N)
+                $CMD "$file" | tee "${BNAME}.log"
+                end_time=$(date +%s%3N)
+                duration=$((end_time - start_time))
+                printf "\-> Execution Time: %s ms\n" "$duration"
+
+                if ! make coverage-json &>"$OUT"; then
+                    echo "Error: Failed to generate coverage."
+                    exit 1
+                fi
+
+                if ! cp coverage.json "${BNAME}.json" &>"$OUT"; then
+                    echo "Error: Failed to copy coverage json report."
+                    exit 1
+                fi
+            done
+            IFS=','
+        else
+            # Default case
+            if ! make coverage-reset &>"$OUT"; then
+                echo "Error: Failed to reset coverage."
+                exit 1
+            fi
+
+            "${SCRIPTS}/run_benchmark.sh" \
+                -n "$SAMPLE_SIZE" -j "$PARALLELIZE" -b "$BENCH_DIR" \
+                -c "$CMD" | tee "${BNAME}.log"
+
+            # This depends on "make coverage-json", so the
+            # coverage.json file will also be generated
+            if ! make coverage &>"$OUT"; then
+                echo "Error: Failed to generate coverage."
+                exit 1
+            fi
+
+            if ! cp -r coverage "${BNAME}_report" &>"$OUT"; then
+                echo "Error: Failed to copy coverage HTML report."
+                exit 1
+            fi
+
+            if ! cp coverage.json "${BNAME}.json" &>"$OUT"; then
+                echo "Error: Failed to copy coverage json report."
+                exit 1
+            fi
         fi
     done
 done
