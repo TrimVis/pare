@@ -16,6 +16,17 @@ def _read_json(file: str):
     return orjson.loads(data)
 
 
+def _lookup_file_no_lines(src_code: str, file_path: str) -> str:
+    if not src_code:
+        return 0
+
+    full_path = os.path.join(src_code, file_path)
+    with open(full_path, 'r') as f:
+        return sum(1 for line in f)
+
+    return 0
+
+
 def _lookup_function_name(src_code: str, file_path: str, line_no: int) -> str:
     if not src_code:
         return "-"
@@ -178,6 +189,13 @@ class FuncAnalyzer:
             branches = value["branches"]
             lines = value["lines"]
             cleaned_path = _clean_path(path)
+
+            # Construct ordered line starts
+            func_line_starts = list(sorted(
+                [(id, value["start_line"]) for (id, value) in functions.items() ],
+                key=lambda x: x[1]
+            ))
+
             for (func_id, func_value) in functions.items():
                 exec_count = func_value["execution_count"]
                 if cutoff is not None and exec_count <= cutoff:
@@ -187,8 +205,11 @@ class FuncAnalyzer:
                 funcs_analyzed += 1
                 func_name = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
                 uid = f"{cleaned_path}:{func_id}"
+                curr_func_id = next(i for i, x in enumerate(func_line_starts) if x[0] == func_id)
+                next_line_start = func_line_starts[curr_func_id + 1][1] if len(func_line_starts) > curr_func_id + 1 else _lookup_file_no_lines(src_code, cleaned_path)
+                no_lines = next_line_start - func_line_starts[curr_func_id][1]
                 res_data.append(
-                    [uid, exec_count, cleaned_path, func_name]
+                    [uid, exec_count, cleaned_path, func_name, no_lines]
                 )
 
         logger.info(f"Usage data contains {funcs_analyzed} of {funcs_analyzed + funcs_skipped} functions. ({100 * funcs_analyzed / (funcs_analyzed + funcs_skipped)}%)")
@@ -204,7 +225,7 @@ class FuncAnalyzer:
         return res_data
 
     def csv(self, input: str="./coverage.json", output: str="./out_functions.csv", src_code: str=None, sort: SortT="asc", cutoff: int = 0):
-        res_header = ["uid", "execution count", "file", "func_name"]
+        res_header = ["uid", "execution count", "file", "func_name", "no_lines"]
         res_data = self._get_usage_data(input, src_code, sort, cutoff)
 
         logger.info(f"Creating csv file at {output}")
@@ -216,7 +237,7 @@ class FuncAnalyzer:
 
     def plot(self, input: str="./coverage.json", output: str=None, src_code: str=None, sort: SortT="asc", cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False):
         res_data = self._get_usage_data(input, src_code, sort, cutoff)
-        df = pd.DataFrame(res_data, columns=['uid', 'exec_count', 'cleaned_path', 'func_name'])
+        df = pd.DataFrame(res_data, columns=['uid', 'exec_count', 'cleaned_path', 'func_name', 'no_lines'])
 
         if percentile_categories:
             percent_categories = [0.3, 1, 2]
