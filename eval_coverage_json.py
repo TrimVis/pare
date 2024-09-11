@@ -17,7 +17,7 @@ import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 from typing import Literal
 
-from plotnine import ggplot, aes, geom_point, theme_minimal, labs, theme, element_blank, facet_wrap, geom_hline, annotate, scale_color_manual, scale_y_log10, geom_line
+from plotnine import ggplot, aes, geom_point, theme_minimal, labs, theme, element_blank, facet_wrap, geom_hline, annotate, scale_color_manual, scale_y_log10, geom_line, facet_wrap
 
 
 
@@ -111,6 +111,18 @@ def _clean_path(path: str) -> str:
     # If none of "src", "build", or "include" are found, return the original path
     return path
 
+def _shorten_path_cblk(group_depth):
+    def shorten_path(file):
+        cs = file.split(os.sep)
+        if cs[-1].endswith((".cpp",".c",".h",".hpp")):
+            cs = cs [:-1]
+
+        if len(cs) > group_depth:
+            return os.sep.join(cs[:group_depth])
+
+        return os.sep.join(cs)
+
+    return shorten_path
 
 SortT = Literal["ASC"] | Literal["DESC"] | bool
 KindT = Literal["line"] | Literal["func"] | Literal["fline"]
@@ -256,6 +268,7 @@ class Csv:
     def fline_usage(self, input: str="./coverage.json", output: str="./out_function_lines.csv", src_code: str=None, sort: SortT=False):
         (res_data, res_header, _) = JsonAnalyzer.get_fline_data(input, src_code, sort)
 
+        logger.info(f"Creating csv file at {output}")
         # Insert header
         res_data.insert(0, res_header)
         with open(output, 'w', newline='') as f:
@@ -471,23 +484,88 @@ class Plotter:
             logger.info(f"Opening plot preview")
             plot.show()
 
-
-    def fline_usage(self, db_file: str="./coverage_db.sqlite", output: str=None, cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False):
+    def func_len(self, db_file: str="./coverage_db.sqlite", output: str=None, cutoff: int = None, log_scale: bool = True, percentile_categories: bool = False, group_depth: int = 2):
         (res_data, res_header) = self._read_from_db(db_file, "fline", cutoff)
         df = pd.DataFrame(res_data, columns=res_header)
 
         # Ensure the data is sorted by func_name and func_no_lines
         df = df.sort_values(by=['file', 'func_name', 'func_no_lines'])
 
+        df["parent folder"] = df["file"].apply(_shorten_path_cblk(group_depth))
+
+        logger.info(f"Creating plot")
+        title ="Distribution of Function Lengths"
+        if cutoff is not None:
+            title += f" (Count >= {cutoff})"
+        plot = (
+            ggplot(df, aes(x='file', y='func_no_lines', color="parent folder")) +
+            geom_point() +
+            theme_minimal() +
+            labs(title=title , x="File", y="No Lines of Function")
+        )
+        if log_scale:
+            plot = plot + scale_y_log10()
+
+        if output:
+            logger.info(f"Storing plot at {output}")
+            plot.save(output, width=8, height=6, dpi=300)
+        else:
+            logger.info(f"Opening plot preview")
+            plot.show()
+
+    def fline_len(self, db_file: str="./coverage_db.sqlite", output: str=None, cutoff: int = None, log_scale: bool = True, percentile_categories: bool = False, group_depth: int = 2):
+        (res_data, res_header) = self._read_from_db(db_file, "fline", cutoff)
+        df = pd.DataFrame(res_data, columns=res_header)
+
+        # Ensure the data is sorted by func_name and func_no_lines
+        df = df.sort_values(by=['file', 'func_name', 'func_no_lines'])
+
+        df["parent folder"] = df["file"].apply(_shorten_path_cblk(group_depth))
+
+        logger.info(f"Creating plot")
+        title ="Distribution of Function Length against Executions"
+        if cutoff is not None:
+            title += f" (Count >= {cutoff})"
+        plot = (
+            ggplot(df, aes(x='execution_count', y='func_no_lines', color="parent folder")) +
+            geom_point() +
+            theme_minimal() +
+            labs(title=title , x="Execution Count", y="No Lines of Function")
+        )
+        if log_scale:
+            plot = plot + scale_y_log10()
+
+        if output:
+            logger.info(f"Storing plot at {output}")
+            plot.save(output, width=8, height=6, dpi=300)
+        else:
+            logger.info(f"Opening plot preview")
+            plot.show()
+
+    def fline_usage(self, db_file: str="./coverage_db.sqlite", output: str=None, cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False, group_depth: int = 2):
+        (res_data, res_header) = self._read_from_db(db_file, "fline", cutoff)
+        ["uid", "execution_count", "file", "func_name", "line_no", "func_no_lines"]
+        df = pd.DataFrame(res_data, columns=res_header)
+
+        # Ensure the data is sorted by func_name and func_no_lines
+        df = df.sort_values(by=['file', 'func_name', 'line_no'])
+
+        df["fid"] = df["file"] + "::" + df["func_name"]
+        df["execution count diff"] = df["execution_count"].diff()
+
+        df["parent_folder"] = df["file"].apply(_shorten_path_cblk(group_depth))
+
         logger.info(f"Creating plot")
         title ="Distribution of Line Accesses per Function"
         if cutoff is not None:
             title += f" (Count >= {cutoff})"
         plot = (
-            ggplot(df, aes(x='func_no_lines', y='execution_count', color="func_name")) +
+            ggplot(df, aes(x='line_no', y='execution_count', color="fid")) +
             geom_line() +
             theme_minimal() +
-            labs(title=title , x="Function Line No.", y="Execution Count")
+            theme(legend_position='none') +
+            facet_wrap('~parent_folder', scales='free') +
+            labs(title=title , x="Line of Function", y="Execution Count")
         )
         if log_scale:
             plot = plot + scale_y_log10()
