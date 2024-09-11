@@ -1,16 +1,30 @@
 #!/usr/bin/env python
 
-import sqlite3
-import fire
-import orjson
-import csv
+import time
 import os
 import sys
-import pandas as pd
+
+import fire
 from loguru import logger 
+import enlighten
+
+import orjson
+import csv
+import sqlite3
+import pandas as pd
+
+import tree_sitter_cpp as tscpp
+from tree_sitter import Language, Parser
+from typing import Literal
+
 from plotnine import ggplot, aes, geom_point, theme_minimal, labs, theme, element_blank, facet_wrap, geom_hline, annotate, scale_color_manual, scale_y_log10, geom_line
 
-from typing import Literal
+
+
+pmanager = enlighten.get_manager(min_delta=0.5)
+
+CPP_LANGUAGE = Language(tscpp.language())
+parser = Parser(CPP_LANGUAGE)
 
 def _read_json(file: str):
     with open(file, "rb") as f:
@@ -18,30 +32,67 @@ def _read_json(file: str):
     return orjson.loads(data)
 
 
-def _lookup_file_no_lines(src_code: str, file_path: str) -> str:
-    if not src_code:
-        return 0
-
-    full_path = os.path.join(src_code, file_path)
-    with open(full_path, 'r') as f:
-        return sum(1 for line in f)
-
-    return 0
-
+_prev_file_path = None
+_prev_tree = None
+_prev_cpp_code = None
+_prev_results = {}
 
 def _lookup_function_name(src_code: str, file_path: str, line_no: int) -> str:
     if not src_code:
         return "-"
 
+    global _prev_file_path, _prev_cpp_code, _prev_tree, _prev_results
+    result_key = (file_path, line_no)
+    if result_key in _prev_results:
+        return _prev_results[result_key]
     
+    full_path = os.path.join(src_code, file_path)
+
+    # Try to extract function name using treesitter
+    if file_path == _prev_file_path:
+        cpp_code = _prev_cpp_code
+        tree = _prev_tree
+    else:
+        with open(full_path, 'rb') as f:
+            cpp_code = f.read()
+            parser.reset()
+            tree = parser.parse(cpp_code, encoding="utf8")
+            _prev_file_path = file_path
+            _prev_cpp_code = cpp_code
+            _prev_tree = tree
+
+    def find_function(node):
+        if node.start_point[0] + 1 == line_no and node.type == 'function_definition':
+            frange = (node.start_point[0] + 1, node.end_point[0] + 1)
+            for child in node.children:
+                if child.type == 'function_declarator':
+                    for cchild in child.children:
+                        if cchild.type == 'identifier':
+                            return (cpp_code[cchild.start_byte:cchild.end_byte].decode("utf-8"), frange)
+                    return (cpp_code[child.start_byte:child.end_byte].decode("utf-8"), frange)
+        
+        for child in node.children:
+            if res := find_function(child):
+                return res
+
+        return None
+
+    res = find_function(tree.root_node)
+    if res:
+        _prev_results[result_key] = res
+        return res
+
+    # TODO pjordan: I don't think this fallback is really needed
+    # Figure out what types the nodes are for which this fails
+
     full_path = os.path.join(src_code, file_path)
     with open(full_path, 'r') as f:
         for i, line in enumerate(f, start=1):
             if i == line_no:
-                return line.strip().rstrip("{")
+                return (line.strip().rstrip("{"), (0,0))
 
     # Not enough line numbers in this file
-    return "-"
+    return ("-", (0,0))
 
 def _clean_path(path: str) -> str:
     # Find the first occurrences of "src", "build", and "include"
@@ -82,6 +133,7 @@ class JsonAnalyzer:
         res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "INTEGER"]
         res_data = [  ]
 
+        pbar = pmanager.counter(total=len(d["sources"].items()), desc='line', unit='source files')
         for (path, value) in d["sources"].items():
             # there is always a object with only the empty key
             value = value[""]
@@ -92,6 +144,8 @@ class JsonAnalyzer:
                 res_data.append(
                     [uid, exec_count, cleaned_path, line_no]
                 )
+            pbar.update()
+        pbar.close()
 
         # Sort the result data, if wanted
         if sort:
@@ -113,6 +167,7 @@ class JsonAnalyzer:
         res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER"]
         res_data = [  ]
 
+        pbar = pmanager.counter(total=len(d["sources"].items()), desc='func', unit='source files')
         for (path, value) in d["sources"].items():
             # there is always a object with only the empty key
             value = value[""]
@@ -121,23 +176,17 @@ class JsonAnalyzer:
             lines = value["lines"]
             cleaned_path = _clean_path(path)
 
-            # Construct ordered line starts
-            func_line_starts = list(sorted(
-                [(id, value["start_line"]) for (id, value) in functions.items() ],
-                key=lambda x: x[1]
-            ))
-
             for (func_id, func_value) in functions.items():
                 exec_count = func_value["execution_count"]
 
-                func_name = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
+                (func_name, frange) = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
                 uid = f"{cleaned_path}:{func_id}"
-                curr_func_id = next(i for i, x in enumerate(func_line_starts) if x[0] == func_id)
-                next_line_start = func_line_starts[curr_func_id + 1][1] if len(func_line_starts) > curr_func_id + 1 else _lookup_file_no_lines(src_code, cleaned_path)
-                no_lines = next_line_start - func_line_starts[curr_func_id][1]
                 res_data.append(
-                    [uid, exec_count, cleaned_path, func_name, no_lines]
+                    [uid, exec_count, cleaned_path, func_name, frange[1] - frange[0]]
                 )
+
+            pbar.update()
+        pbar.close()
 
         # Sort the result data, if wanted
         if sort:
@@ -156,10 +205,11 @@ class JsonAnalyzer:
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
-        res_header = ["uid", "execution_count", "file", "func_name", "line_no", "func_line_no"]
+        res_header = ["uid", "execution_count", "file", "func_name", "line_no", "func_no_lines"]
         res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER", "INTEGER"]
         res_data = [  ]
         
+        pbar = pmanager.counter(total=len(d["sources"].items()), desc='fline', unit='source files')
         for (path, value) in d["sources"].items():
             # there is always a object with only the empty key
             value = value[""]
@@ -170,28 +220,27 @@ class JsonAnalyzer:
 
             func_line_map = []
             for (func_id, func_value) in functions.items():
-                func_name = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
+                (func_name, frange) = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
                 func_line_map.append(
-                    (cleaned_path, func_id, func_name, func_value["start_line"])
+                    (cleaned_path, func_id, func_name, frange[0], frange[1])
                 )
 
             curr_func_i = 0
-            prev_count = None
             f_data = []
             for (line_no, exec_count) in lines.items():
 
                 # Check if line falls into next function
                 if curr_func_i < (len(func_line_map) - 1) and int(line_no) >= int(func_line_map[curr_func_i][3]):
-                    prev_count = None
                     curr_func_i += 1
 
-                prev_count = exec_count
-
-                (func_path, func_id, func_name, func_start) = func_line_map[curr_func_i]
+                (func_path, func_id, func_name, func_start, func_end) = func_line_map[curr_func_i]
                 uid = f"{func_path}:{func_id}:l{line_no}"
                 res_data.append(
-                    [uid, exec_count, func_path, func_name, line_no, int(line_no) - func_start]
+                    [uid, exec_count, func_path, func_name, line_no, func_end - func_start]
                 )
+
+            pbar.update()
+        pbar.close()
 
         # Sort the result data, if wanted
         if sort:
@@ -427,15 +476,15 @@ class Plotter:
         (res_data, res_header) = self._read_from_db(db_file, "fline", cutoff)
         df = pd.DataFrame(res_data, columns=res_header)
 
-        # Ensure the data is sorted by func_name and func_line_no
-        df = df.sort_values(by=['file', 'func_name', 'func_line_no'])
+        # Ensure the data is sorted by func_name and func_no_lines
+        df = df.sort_values(by=['file', 'func_name', 'func_no_lines'])
 
         logger.info(f"Creating plot")
         title ="Distribution of Line Accesses per Function"
         if cutoff is not None:
             title += f" (Count >= {cutoff})"
         plot = (
-            ggplot(df, aes(x='func_line_no', y='execution_count', color="func_name")) +
+            ggplot(df, aes(x='func_no_lines', y='execution_count', color="func_name")) +
             geom_line() +
             theme_minimal() +
             labs(title=title , x="Function Line No.", y="Execution Count")

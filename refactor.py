@@ -4,14 +4,14 @@ import fire
 import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 
+CPP_LANGUAGE = Language(tscpp.language())
+parser = Parser(CPP_LANGUAGE)
+
 RED = "\033[31m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
 BLUE = "\033[34m"
 RESET = "\033[0m"
-
-CPP_LANGUAGE = Language(tscpp.language())
-parser = Parser(CPP_LANGUAGE)
 
 def _get_tree_from_file(file):
     with open(file, 'rb') as content:
