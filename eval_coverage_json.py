@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import sqlite3
 import fire
 import orjson
 import csv
@@ -62,11 +63,13 @@ def _clean_path(path: str) -> str:
 SortT = Literal["ASC"] | Literal["DESC"] | bool
 
 class LineAnalyzer:
-    def _get_usage_data(self, input: str, src_code: str, sort: SortT, cutoff: int):
+    def _get_usage_data(self, input: str, src_code: str, sort: SortT = False, cutoff: int = None):
         logger.info(f"Reading usage data from {input}")
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
+        res_header = ["uid", "execution_count", "file_path", "line_no"]
+        res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "INTEGER"]
         res_data = [  ]
 
         lines_analyzed = 0
@@ -98,11 +101,10 @@ class LineAnalyzer:
             key_fn = lambda i: i[1]
             res_data.sort(key=key_fn, reverse=reverse_sort)
 
-        return res_data
+        return (res_data, res_header, res_sqlite_types)
 
     def csv(self, input: str="./coverage.json", output: str="./out_lines.csv", src_code: str=None, sort: SortT="asc", cutoff: int = 0):
-        res_header = ["uid", "execution count", "file_path", "line_no"]
-        res_data = self._get_usage_data(input, src_code, sort, cutoff)
+        (res_data, res_header, _) = self._get_usage_data(input, src_code, sort, cutoff)
 
         logger.info(f"Creating csv file at {output}")
         # Insert header
@@ -112,8 +114,8 @@ class LineAnalyzer:
             writer.writerows(res_data)
 
     def plot(self, input: str="./coverage.json", output: str=None, src_code: str=None, sort: SortT="asc", cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False):
-        res_data = self._get_usage_data(input, src_code, sort, cutoff)
-        df = pd.DataFrame(res_data, columns=['uid', 'exec_count', 'file', 'line_no'])
+        (res_data, res_header, _) = self._get_usage_data(input, src_code, sort, cutoff)
+        df = pd.DataFrame(res_data, columns=res_header)
 
         if percentile_categories:
             percent_categories = [0.3, 1, 2]
@@ -172,11 +174,13 @@ class LineAnalyzer:
             plot.show()
 
 class FuncAnalyzer:
-    def _get_usage_data(self, input: str, src_code: str, sort: SortT, cutoff: int):
+    def _get_usage_data(self, input: str, src_code: str, sort: SortT = False, cutoff: int = None):
         logger.info(f"Reading usage data from {input}")
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
+        res_header = ["uid", "execution_count", "file", "func_name", "no_lines"]
+        res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER"]
         res_data = [  ]
 
         funcs_analyzed = 0
@@ -222,11 +226,10 @@ class FuncAnalyzer:
             key_fn = lambda i: i[1]
             res_data.sort(key=key_fn, reverse=reverse_sort)
 
-        return res_data
+        return (res_data, res_header, res_sqlite_types)
 
     def csv(self, input: str="./coverage.json", output: str="./out_functions.csv", src_code: str=None, sort: SortT="asc", cutoff: int = 0):
-        res_header = ["uid", "execution count", "file", "func_name", "no_lines"]
-        res_data = self._get_usage_data(input, src_code, sort, cutoff)
+        (res_data, res_header, _) = self._get_usage_data(input, src_code, sort, cutoff)
 
         logger.info(f"Creating csv file at {output}")
         # Insert header
@@ -236,8 +239,8 @@ class FuncAnalyzer:
             writer.writerows(res_data)
 
     def plot(self, input: str="./coverage.json", output: str=None, src_code: str=None, sort: SortT="asc", cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False):
-        res_data = self._get_usage_data(input, src_code, sort, cutoff)
-        df = pd.DataFrame(res_data, columns=['uid', 'exec_count', 'cleaned_path', 'func_name', 'no_lines'])
+        (res_data, res_header, _) = self._get_usage_data(input, src_code, sort, cutoff)
+        df = pd.DataFrame(res_data, columns=res_header)
 
         if percentile_categories:
             percent_categories = [0.3, 1, 2]
@@ -297,10 +300,12 @@ class FuncAnalyzer:
 
 
 class FuncLineAnalyzer:
-    def _get_usage_data(self, input: str, src_code: str, sort: SortT, cutoff: int, relevance_filter: float):
+    def _get_usage_data(self, input: str, src_code: str, sort: SortT = False, cutoff: int = None, relevance_filter: float = None):
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
+        res_header = ["uid", "execution_count", "file", "func_name", "line_no", "func_line_no"]
+        res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER", "INTEGER"]
         res_data = [  ]
         
         lines_skipped = 0
@@ -374,11 +379,10 @@ class FuncLineAnalyzer:
             logger.info(f"Relevant functions found: {relevant_functions} of {relevant_functions + non_relevant_functions} lines. ({100 * relevant_functions / (relevant_functions + non_relevant_functions)}%)")
             logger.info(f"Ignored {non_relevant_functions} functions ({100* non_relevant_functions / (relevant_functions + non_relevant_functions)}%), due to line-by-line relative change being larger than {100*relevance_filter}%")
 
-        return res_data
+        return (res_data, res_header, res_sqlite_types)
 
     def csv(self, input: str="./coverage.json", output: str="./out_function_lines.csv", src_code: str=None, sort: SortT=False, cutoff: int = None, relevance_filter: float = None):
-        res_header = ["uid", "execution count", "file", "func_name", "line_no", "func_line_no"]
-        res_data = self._get_usage_data(input, src_code, sort, cutoff, relevance_filter)
+        (res_data, res_header, _) = self._get_usage_data(input, src_code, sort, cutoff, relevance_filter)
 
         # Insert header
         res_data.insert(0, res_header)
@@ -387,8 +391,8 @@ class FuncLineAnalyzer:
             writer.writerows(res_data)
 
     def plot(self, input: str="./coverage.json", output: str=None, src_code: str=None, sort: SortT="asc", cutoff: int = None, log_scale: bool = False, relevance_filter: float=None):
-        res_data = self._get_usage_data(input, src_code, sort, cutoff, relevance_filter)
-        df = pd.DataFrame(res_data, columns=['uid', 'exec_count', 'file', 'func_name', "line_no", "func_line_no"])
+        (res_data, res_header, _) = self._get_usage_data(input, src_code, sort, cutoff, relevance_filter)
+        df = pd.DataFrame(res_data, columns=res_header)
 
         # Ensure the data is sorted by func_name and func_line_no
         df = df.sort_values(by=['file', 'func_name', 'func_line_no'])
@@ -425,6 +429,53 @@ class Analyzer:
 
     def fline_usage(self):
         return FuncLineAnalyzer()
+
+    def generate_db(self, input: str="./coverage.json", output: str="./coverage_db.sqlite", src_code: str=None):
+        la = LineAnalyzer()
+        fa = FuncAnalyzer()
+        fla = FuncLineAnalyzer()
+
+        # Add table names
+        la.table_name = "LineUsage"
+        fa.table_name = "FunctionUsage"
+        fla.table_name = "FunctionLineUsage"
+
+        # Connect to DB
+        conn = sqlite3.connect(output)
+        cur = conn.cursor()
+
+        # Generate a DB table for all analyzer results
+        for a in [la, fa, fla]:
+            logger.info(f"Fetching data for table {a.table_name}")
+            (data, header, headers_types) = a._get_usage_data(input, src_code)
+
+            # Create the table
+            logger.info(f"Creating table {a.table_name}")
+
+            table_fields = ", ".join( 
+                [ f"{h} {t}" for (h, t) in zip(header, headers_types) ]
+            )
+            query = f"CREATE TABLE IF NOT EXISTS {a.table_name} ({table_fields})"
+            logger.debug(query)
+            cur.execute(query)
+
+            # Insert all datapoints
+            logger.info(f"Inserting table data")
+
+            table_fields = ", ".join(header)
+            table_placeholder = ", ".join(["?" for _ in header])
+            query = f"INSERT INTO {a.table_name} ({table_fields}) VALUES ({table_placeholder})"
+            logger.debug(query)
+            cur.executemany(query, data)
+
+        logger.info(f"Cleaning up")
+        conn.commit()
+        conn.close()
+
+
+
+
+
 
 
 
