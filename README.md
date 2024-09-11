@@ -38,7 +38,12 @@ An example execution could look like the following command:<br/>
     ./benchmark_runs/tlimit10000-trace/         # Path to results folder
 ```
 
+### Coverage Run Validations
+To validate that the tested implementation does not create incorrect results, a helper script `validate_results.py` has been introduced.
+This script parses and compares the log files created by `run_benchmark.sh`.
+
 ### Coverage Run Evaluations
+> NOTE pjordan: This is out of date and needs to be updated
 `eval_coverage_json.py` is a helper script to evaluate the use of functions, lines and lines inside functions (WIP).
 It provides commands to generate CSV files which can then potentially be used later on, as well as some plots for visualization purposes.
 
