@@ -4,4 +4,6 @@
 *.json
 *.csv
 *.sqlite
+*.out
+*.cpp
 

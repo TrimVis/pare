@@ -3,3 +3,5 @@ orjson
 pandas
 plotnine
 loguru
+tree-sitter
+tree-sitter-cpp
