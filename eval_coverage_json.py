@@ -89,10 +89,10 @@ def _lookup_function_name(src_code: str, file_path: str, line_no: int) -> str:
     with open(full_path, 'r') as f:
         for i, line in enumerate(f, start=1):
             if i == line_no:
-                return (line.strip().rstrip("{"), (0,0))
+                return (line.strip().rstrip("{"), (line_no,-1))
 
     # Not enough line numbers in this file
-    return ("-", (0,0))
+    return ("-", (-1,-1))
 
 def _clean_path(path: str) -> str:
     # Find the first occurrences of "src", "build", and "include"
@@ -175,8 +175,8 @@ class JsonAnalyzer:
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
-        res_header = ["uid", "execution_count", "file", "func_name", "no_lines"]
-        res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER"]
+        res_header = ["uid", "execution_count", "file", "func_name", "start_line", "end_line"]
+        res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER", "INTEGER"]
         res_data = [  ]
 
         pbar = pmanager.counter(total=len(d["sources"].items()), desc='func', unit='source files')
@@ -194,7 +194,7 @@ class JsonAnalyzer:
                 (func_name, frange) = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
                 uid = f"{cleaned_path}:{func_id}"
                 res_data.append(
-                    [uid, exec_count, cleaned_path, func_name, frange[1] - frange[0]]
+                    [uid, exec_count, cleaned_path, func_name, frange[0], frange[1]]
                 )
 
             pbar.update()
@@ -248,7 +248,7 @@ class JsonAnalyzer:
                 (func_path, func_id, func_name, func_start, func_end) = func_line_map[curr_func_i]
                 uid = f"{func_path}:{func_id}:l{line_no}"
                 res_data.append(
-                    [uid, exec_count, func_path, func_name, line_no, func_end - func_start]
+                    [uid, exec_count, func_path, func_name, line_no, func_end - func_start if func_start != -1 else -1]
                 )
 
             pbar.update()
