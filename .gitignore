@@ -1,10 +1,12 @@
 /benchmarks/
 /benchmark_runs/
 /venv/
+__pycache__
 *.json
 *.csv
 *.sqlite
 *.sqlite-journal
 *.out
 *.cpp
+*.backup
 
