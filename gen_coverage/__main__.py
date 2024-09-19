@@ -8,7 +8,8 @@ import shutil
 import signal
 from pathlib import Path
 
-from .utils import make_helper, run_benchmark, combine_reports
+from .benchmark import run_benchmark
+from .gcov import gcov_init, gcov_cleanup, gen_json_reports
 
 def handle_interrupt(signum, frame):
     print("Interrupt received, stopping the script.")
@@ -38,14 +39,19 @@ def main():
     out_dir = Path(args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # cwd = os.getcwd()
+
     # Change to build directory
-    os.chdir(build_dir)
+    # os.chdir(build_dir)
 
     sample_sizes = args.sample_size.split(',')
     cvc5_executable = build_dir / 'bin' / 'cvc5'
     if not cvc5_executable.is_file():
         print(f"Error: cvc5 executable not found at {cvc5_executable}")
         sys.exit(1)
+
+    # Reset coverage & create necessary folders
+    gcov_init()
 
     for sample_size in sample_sizes:
         for run_number in range(args.run_start_no, args.no_runs + 1):
@@ -54,20 +60,14 @@ def main():
 
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sample Size: {sample_size} \tArgs: {args.cvc5_args} \trun: {run_number}/{args.no_runs}")
 
-            # Reset coverage
-            make_helper('coverage-reset', out=out)
-
             # The run_benchmark function handles sampling, execution and logging
-            (log_file, gcov_prefixes) = run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, per_file_gcov=args.individual)
+            run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, per_file_gcov=args.individual)
 
-            # Create the json file
-            make_helper('coverage' if args.full_report else 'coverage-json',
-                        gcov_prefixes=gcov_prefixes, out=out)
+    gen_json_reports()
 
-            # Copy coverage reports
-            if args.full_report:
-                shutil.copytree('coverage', f"{bname}_report")
-            shutil.copy('coverage.json', os.path.join(out_dir, f"{bname}.json"))
+    # Reset coverage & remove folders
+    gcov_cleanup()
+
 
     print("exit")
 
