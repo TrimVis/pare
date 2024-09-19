@@ -248,7 +248,7 @@ class JsonAnalyzer:
                 (func_path, func_id, func_name, func_start, func_end) = func_line_map[curr_func_i]
                 uid = f"{func_path}:{func_id}:l{line_no}"
                 res_data.append(
-                    [uid, exec_count, func_path, func_name, line_no, func_end - func_start if func_start != -1 else -1]
+                    [uid, exec_count, func_path, func_name, line_no, func_end - func_start if func_end != -1 else -1]
                 )
 
             pbar.update()
