@@ -9,7 +9,7 @@ import signal
 from pathlib import Path
 
 from .benchmark import run_benchmark
-from .gcov import gcov_init, gcov_cleanup, gen_json_reports
+from .gcov import gcov_init, gcov_cleanup
 
 def handle_interrupt(signum, frame):
     print("Interrupt received, stopping the script.")
@@ -60,11 +60,8 @@ def main():
 
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sample Size: {sample_size} \tArgs: {args.cvc5_args} \trun: {run_number}/{args.no_runs}")
 
-            # The run_benchmark function handles sampling, execution and logging
+            # The run_benchmark function handles sampling, execution, logging and output generation
             run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, use_prefix=args.individual)
-
-    # Now handled through run_benchmark
-    # gen_json_reports(job_size=args.job_size, verbose=args.verbose)
 
     # Reset coverage & remove folders
     gcov_cleanup()

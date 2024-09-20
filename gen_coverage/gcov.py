@@ -45,7 +45,6 @@ def get_gcov_env(file):
 
 def get_gcda_paths(prefix=GCOV_PREFIX_BASE):
     path_wildcard = os.path.join(prefix, "**/*.gcda")
-    print(path_wildcard)
     return glob.glob(path_wildcard, recursive=True)
 
 def get_prefix_files(prefix=GCOV_PREFIX_BASE):
@@ -55,16 +54,6 @@ def get_prefix_files(prefix=GCOV_PREFIX_BASE):
         prefix = GCOV_PREFIX_BASE + parts[0]
         file = os.path.join('/', *parts[1:])
         res.append(file)
-
-    return res
-
-def get_prefix_files_map():
-    res = defaultdict(list)
-    for p in get_gcda_paths():
-        parts = Path(p.removeprefix(GCOV_PREFIX_BASE)).parts
-        prefix = GCOV_PREFIX_BASE + parts[0]
-        file = os.path.join('/', *parts[1:])
-        res[prefix].append(file)
 
     return res
 
@@ -86,28 +75,3 @@ def process_prefix(prefix, files, verbose=False):
         # Merge files together using our special "per-test" counter
         combine_reports(files_report, next_report, exec_one=True)
     return files_report
-
-def gen_json_reports(job_size=1, verbose=False):
-    report = { "sources": {} }
-    prefix_files_map = get_prefix_files_map()
-
-    if job_size > 1:
-        with ThreadPoolExecutor(max_workers=job_size) as executor:
-            futures = {
-                executor.submit(process_prefix, prefix, files, verbose): (prefix, files)
-                for (prefix, files) in prefix_files_map.items()
-            }
-
-            # Merge files together normally
-            for future in as_completed(futures):
-                combine_reports(report, future.result(), exec_one=False)
-    else:
-        for (prefix, files) in prefix_files_map.items():
-            files_report = process_prefix(prefix, files)
-
-            # Merge files together normally
-            combine_reports(report, files_report, exec_one=False)
-
-    with open("./coverage.json", "w") as f:
-        json.dump(report, f)
-

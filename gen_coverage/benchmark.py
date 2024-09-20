@@ -35,22 +35,36 @@ def process_file(file, cmd_arg, use_prefix=False):
     """Process a single file with the given command."""
     res = f"| File: {file}\n"
     start_time = time.time()
+
     try:
         if use_prefix:
             result = subprocess.run(cmd_arg + [file], env=get_gcov_env(file), check=True, capture_output=True, text=True,)
         else:
             result = subprocess.run(cmd_arg + [file], check=True, capture_output=True, text=True,)
-        res += result.stdout
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] File: {file}")
-        print(result.stdout)
+        res += result.stdout[:-1]
+        sout = result.stdout[:-1]
     except subprocess.CalledProcessError as e:
         res += f"Error processing file {file}: {e}\n"
+        sout = "timeout/crash"
+
     duration = (time.time() - start_time) * 1000  # Convert to milliseconds
     res += f"-> Execution Time: {duration:.2f} ms\n"
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] File: /.../{'/'.join(Path(file).parts[-5:])}")
+    print(sout)
+
+    start_time = time.time()
 
     prefix = get_prefix(file)
     files = get_prefix_files(prefix)
     files_report = process_prefix(prefix, files)
+
+    # Delete the folder to keep storage available
+    shutil.rmtree(prefix)
+
+    duration = (time.time() - start_time) * 1000  # Convert to milliseconds
+    res += f"-> Processing Time: {duration:.2f} ms\n"
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processed prefix for /.../{'/'.join(Path(file).parts[-5:])}")
+
     return (res, files_report)
 
 def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_prefix=False):
@@ -59,8 +73,6 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_pref
     files = sample_files(sample_size, benchmark_dir)
     log_path = Path(f"{bname}.log")
     log_file = open(log_path, 'w')
-
-    # overall_start_time = time.time()
 
     print(f"Running benchmark on {sample_size} test files in {benchmark_dir}\n", file=log_file)
     print(f"No. jobs: {job_size}\n", file=log_file)
@@ -83,12 +95,6 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_pref
 
     with open("./coverage.json", "w") as f:
         json.dump(report, f)
-
-    # overall_duration = (time.time() - overall_start_time) * 1000  # Convert to milliseconds
-
-    # Doesn't really make sense anymore
-    # print("\n-------------------------------------\n", file=log_file)
-    # print(f"=> Overall Execution Time: {overall_duration:.2f} ms", file=log_file)
 
     log_file.close()
 
