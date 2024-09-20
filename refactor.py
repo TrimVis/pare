@@ -19,7 +19,8 @@ def _get_tree_from_file(file):
 
 class RefactorEngine:
     def analyze_core(self):
-        tree = _get_tree_from_file("./example.cpp")
+        # tree = _get_tree_from_file("./example.cpp")
+        tree = _get_tree_from_file("/home/trim/uni/FS24/master-thesis/cvc5-repo/src/expr/type_node.cpp")
         root_node = tree.root_node
 
         line_execution_map = { 14: 100, 8: 100 }

@@ -51,7 +51,7 @@ def main():
         sys.exit(1)
 
     # Reset coverage & create necessary folders
-    gcov_init()
+    gcov_init(bench_dir)
 
     for sample_size in sample_sizes:
         for run_number in range(args.run_start_no, args.no_runs + 1):
@@ -61,12 +61,12 @@ def main():
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sample Size: {sample_size} \tArgs: {args.cvc5_args} \trun: {run_number}/{args.no_runs}")
 
             # The run_benchmark function handles sampling, execution and logging
-            run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, per_file_gcov=args.individual)
+            run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, use_prefix=args.individual)
 
     gen_json_reports()
 
     # Reset coverage & remove folders
-    gcov_cleanup()
+    # gcov_cleanup()
 
 
     print("exit")

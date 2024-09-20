@@ -50,7 +50,7 @@ def process_file(file, cmd_arg, use_prefix=False):
 
     return res
 
-def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, per_file_gcov=False):
+def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_prefix=False):
     """Run the benchmark on sampled files."""
     files = sample_files(sample_size, benchmark_dir)
     log_path = Path(f"{bname}.log")
@@ -65,12 +65,12 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, per_file
     # Run commands either in parallel or sequentially
     if job_size > 1:
         with ThreadPoolExecutor(max_workers=job_size) as executor:
-            futures = {executor.submit(process_file, file, cmd_arg): file for file in files}
+            futures = {executor.submit(process_file, file, cmd_arg, use_prefix): file for file in files}
             for future in as_completed(futures):
                 print(future.result(), file=log_file)
     else:
         for file in files:
-            log = process_file(file, cmd_arg)
+            log = process_file(file, cmd_arg, use_prefix)
             print(log, file=log_file)
 
     overall_duration = (time.time() - overall_start_time) * 1000  # Convert to milliseconds
