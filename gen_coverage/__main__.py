@@ -63,10 +63,11 @@ def main():
             # The run_benchmark function handles sampling, execution and logging
             run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, use_prefix=args.individual)
 
-    gen_json_reports()
+    # Now handled through run_benchmark
+    # gen_json_reports(job_size=args.job_size, verbose=args.verbose)
 
     # Reset coverage & remove folders
-    # gcov_cleanup()
+    gcov_cleanup()
 
 
     print("exit")

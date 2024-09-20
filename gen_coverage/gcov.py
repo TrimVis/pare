@@ -43,9 +43,20 @@ def get_gcov_env(file):
 
     return env
 
-def get_gcda_paths():
-    path_wildcard = os.path.join(GCOV_PREFIX_BASE, "**/*.gcda")
+def get_gcda_paths(prefix=GCOV_PREFIX_BASE):
+    path_wildcard = os.path.join(prefix, "**/*.gcda")
+    print(path_wildcard)
     return glob.glob(path_wildcard, recursive=True)
+
+def get_prefix_files(prefix=GCOV_PREFIX_BASE):
+    res = list()
+    for p in get_gcda_paths(prefix):
+        parts = Path(p.removeprefix(GCOV_PREFIX_BASE)).parts
+        prefix = GCOV_PREFIX_BASE + parts[0]
+        file = os.path.join('/', *parts[1:])
+        res.append(file)
+
+    return res
 
 def get_prefix_files_map():
     res = defaultdict(list)
@@ -57,31 +68,45 @@ def get_prefix_files_map():
 
     return res
 
+def process_prefix(prefix, files, verbose=False):
+    env = os.environ.copy()
+    env["GCOV_PREFIX"] = prefix
 
-def gen_json_reports():
+    files_report = { "sources": {} }
+    for gcda_file in files:
+        result = subprocess.run(['gcov', '--json', '--stdout', gcda_file], env=env, check=False, capture_output=True, text=True)
+        next_report = {"sources": {}}
+
+        store_noisy_branches = False
+        source = json.loads(result.stdout)
+        for f in source["files"]:
+            f["file_abs"] = gcda_file.removesuffix(".gcda")
+            distillSource(f, next_report["sources"], "", store_noisy_branches)
+
+        # Merge files together using our special "per-test" counter
+        combine_reports(files_report, next_report, exec_one=True)
+    return files_report
+
+def gen_json_reports(job_size=1, verbose=False):
     report = { "sources": {} }
     prefix_files_map = get_prefix_files_map()
 
-    for (prefix, files) in prefix_files_map.items():
-        env = os.environ.copy()
-        env["GCOV_PREFIX"] = prefix
+    if job_size > 1:
+        with ThreadPoolExecutor(max_workers=job_size) as executor:
+            futures = {
+                executor.submit(process_prefix, prefix, files, verbose): (prefix, files)
+                for (prefix, files) in prefix_files_map.items()
+            }
 
-        files_report = { "sources": {} }
-        for gcda_file in files:
-            result = subprocess.run(['gcov', '--json', '--stdout', gcda_file], env=env, check=False, capture_output=True, text=True)
-            next_report = {"sources": {}}
+            # Merge files together normally
+            for future in as_completed(futures):
+                combine_reports(report, future.result(), exec_one=False)
+    else:
+        for (prefix, files) in prefix_files_map.items():
+            files_report = process_prefix(prefix, files)
 
-            store_noisy_branches = False
-            source = json.loads(result.stdout)
-            for f in source["files"]:
-                f["file_abs"] = gcda_file.removesuffix(".gcda")
-                distillSource(f, next_report["sources"], "", store_noisy_branches)
-
-            # Merge files together using our special "per-test" counter
-            combine_reports(files_report, next_report, exec_one=True)
-
-        # Merge files together normally
-        combine_reports(report, files_report, exec_one=False)
+            # Merge files together normally
+            combine_reports(report, files_report, exec_one=False)
 
     with open("./coverage.json", "w") as f:
         json.dump(report, f)
