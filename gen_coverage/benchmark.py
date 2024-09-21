@@ -7,6 +7,7 @@ import random
 import subprocess
 import json
 from pathlib import Path
+# from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .gcov import get_gcov_env, process_prefix, get_prefix, get_prefix_files, combine_reports
@@ -41,16 +42,18 @@ def process_file(file, cmd_arg, use_prefix=False):
             result = subprocess.run(cmd_arg + [file], env=get_gcov_env(file), check=True, capture_output=True, text=True,)
         else:
             result = subprocess.run(cmd_arg + [file], check=True, capture_output=True, text=True,)
-        res += result.stdout[:-1]
         sout = result.stdout[:-1]
     except subprocess.CalledProcessError as e:
-        res += f"Error processing file {file}: {e}\n"
-        sout = "timeout/crash"
+        if e.returncode == 6:
+            sout = "timeout"
+        else:
+            res += f"Error processing file {file}: {e}\n"
+            sout = "crash"
 
+    res += f"{sout}\n"
     duration = (time.time() - start_time) * 1000  # Convert to milliseconds
     res += f"-> Execution Time: {duration:.2f} ms\n"
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] File: /.../{'/'.join(Path(file).parts[-5:])}")
-    print(sout)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Execution of /.../{'/'.join(Path(file).parts[-5:])}:\n{sout}")
 
     start_time = time.time()
 
@@ -80,6 +83,8 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_pref
 
     # Run commands either in parallel or sequentially
     if job_size > 1:
+        # True multiprocessing
+        # with ProcessPoolExecutor(max_workers=job_size) as executor:
         with ThreadPoolExecutor(max_workers=job_size) as executor:
             futures = {executor.submit(process_file, file, cmd_arg, use_prefix): file for file in files}
             for future in as_completed(futures):
@@ -93,7 +98,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_pref
             print(log, file=log_file)
             combine_reports(report, files_report, exec_one=False)
 
-    with open("./coverage.json", "w") as f:
+    with open(f"{bname}_coverage.json", "w") as f:
         json.dump(report, f)
 
     log_file.close()
