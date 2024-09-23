@@ -23,7 +23,7 @@ def sample_files(sample_size, benchmark_dir):
     total_files = len(all_files)
     
     if sample_size == 'all':
-        return all_files
+        return random.shuffle(all_files)
     else:
         sample_size_int = int(sample_size)
         if sample_size_int > total_files:
@@ -31,11 +31,11 @@ def sample_files(sample_size, benchmark_dir):
             sys.exit(1)
         return random.sample(all_files, sample_size_int)
 
-def process_file(file, cmd_arg, build_dir, worker_id=None, use_prefix=False):
+def process_file(file, cmd_arg, build_dir, batch_id=None, use_prefix=False):
     """Process a single file with the given command."""
     res = f"| File: {file}\n"
     start_time = time.time()
-    wid_msg = "" if worker_id is None else f" in worker {worker_id}"
+    bid_msg = "" if batch_id is None else f" in batch {batch_id}"
 
     try:
         if use_prefix:
@@ -53,7 +53,7 @@ def process_file(file, cmd_arg, build_dir, worker_id=None, use_prefix=False):
     res += f"{sout}\n"
     duration = (time.time() - start_time) * 1000  # Convert to milliseconds
     res += f"-> Execution Time: {duration:.2f} ms\n"
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Execution of /.../{'/'.join(Path(file).parts[-5:])}{wid_msg}:\n{sout}")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Execution of /.../{'/'.join(Path(file).parts[-5:])}{bid_msg}:\n{sout}")
 
     start_time = time.time()
 
@@ -67,18 +67,18 @@ def process_file(file, cmd_arg, build_dir, worker_id=None, use_prefix=False):
 
     duration = (time.time() - start_time) * 1000  # Convert to milliseconds
     res += f"-> Processing Time: {duration:.2f} ms\n"
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processed prefix for /.../{'/'.join(Path(file).parts[-5:])}{wid_msg}")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processed prefix for /.../{'/'.join(Path(file).parts[-5:])}{bid_msg}")
 
     return (res, files_report)
 
-def process_file_batch(file_batch, cmd_arg, build_dir, worker_id=None, use_prefix=False):
+def process_file_batch(file_batch, cmd_arg, build_dir, batch_id=None, use_prefix=False):
     log = ""
     report = { "sources": {} }
     for file in file_batch:
-        (flog, freport) = process_file(file, cmd_arg, build_dir, worker_id, use_prefix=use_prefix)
+        (flog, freport) = process_file(file, cmd_arg, build_dir, batch_id, use_prefix=use_prefix)
         log += flog
         combine_reports(report, freport, exec_one=False)
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Combined intermediate results for worker {worker_id or 0}")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Combined intermediate results for batch {batch_id}")
 
     return (log, report)
 
@@ -97,12 +97,12 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
     # Run commands either in parallel or sequentially
     if job_size > 1:
 
-        file_batches = [files[i::job_size] for i in range(job_size)]
+        file_batches = [files[i::job_size] for i in range(10 * job_size)]
 
         with ProcessPoolExecutor(max_workers=job_size) as executor:
             # futures = {executor.submit(process_file, file, cmd_arg, build_dir, use_prefix): file for file in files}
-            futures = { executor.submit(process_file_batch, batch, cmd_arg, build_dir, worker_id, use_prefix): worker_id 
-                        for worker_id, batch in enumerate(file_batches)}
+            futures = { executor.submit(process_file_batch, batch, cmd_arg, build_dir, batch_id, use_prefix): batch_id 
+                        for batch_id, batch in enumerate(file_batches)}
             for i, future in enumerate(as_completed(futures)):
                 (log, files_report) = future.result()
                 print(log, file=log_file)
