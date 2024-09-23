@@ -7,10 +7,9 @@ import random
 import subprocess
 import json
 from pathlib import Path
-# from concurrent.futures import ProcessPoolExecutor, as_completed
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from .gcov import get_gcov_env, process_prefix, get_prefix, get_prefix_files, combine_reports
+from .gcov import get_gcov_env, process_prefix, get_prefix, get_prefix_files, combine_reports, symlink_gcno_files
 
 def sample_files(sample_size, benchmark_dir):
     """Sample files from the benchmark directory."""
@@ -32,7 +31,7 @@ def sample_files(sample_size, benchmark_dir):
             sys.exit(1)
         return random.sample(all_files, sample_size_int)
 
-def process_file(file, cmd_arg, use_prefix=False):
+def process_file(file, cmd_arg, build_dir, use_prefix=False):
     """Process a single file with the given command."""
     res = f"| File: {file}\n"
     start_time = time.time()
@@ -44,11 +43,11 @@ def process_file(file, cmd_arg, use_prefix=False):
             result = subprocess.run(cmd_arg + [file], check=True, capture_output=True, text=True,)
         sout = result.stdout[:-1]
     except subprocess.CalledProcessError as e:
-        if e.returncode == 6:
+        if e.returncode == -6:
             sout = "timeout"
         else:
             res += f"Error processing file {file}: {e}\n"
-            sout = "crash"
+            sout = f"crash (returncode: {e.returncode})"
 
     res += f"{sout}\n"
     duration = (time.time() - start_time) * 1000  # Convert to milliseconds
@@ -59,6 +58,7 @@ def process_file(file, cmd_arg, use_prefix=False):
 
     prefix = get_prefix(file)
     files = get_prefix_files(prefix)
+    symlink_gcno_files(build_dir, prefix)
     files_report = process_prefix(prefix, files)
 
     # Delete the folder to keep storage available
@@ -70,7 +70,7 @@ def process_file(file, cmd_arg, use_prefix=False):
 
     return (res, files_report)
 
-def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_prefix=False):
+def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_dir, use_prefix=False):
     """Run the benchmark on sampled files."""
     report = { "sources": {} }
     files = sample_files(sample_size, benchmark_dir)
@@ -83,10 +83,8 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_pref
 
     # Run commands either in parallel or sequentially
     if job_size > 1:
-        # True multiprocessing
-        # with ProcessPoolExecutor(max_workers=job_size) as executor:
-        with ThreadPoolExecutor(max_workers=job_size) as executor:
-            futures = {executor.submit(process_file, file, cmd_arg, use_prefix): file for file in files}
+        with ProcessPoolExecutor(max_workers=job_size) as executor:
+            futures = {executor.submit(process_file, file, cmd_arg, build_dir, use_prefix): file for file in files}
             for future in as_completed(futures):
                 (log, files_report) = future.result()
                 print(log, file=log_file)
@@ -94,7 +92,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, use_pref
 
     else:
         for file in files:
-            (log, files_report) = process_file(file, cmd_arg, use_prefix)
+            (log, files_report) = process_file(file, cmd_arg, build_dir, use_prefix)
             print(log, file=log_file)
             combine_reports(report, files_report, exec_one=False)
 

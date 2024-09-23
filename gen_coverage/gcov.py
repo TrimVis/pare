@@ -12,6 +12,31 @@ from .utils import combine_reports
 from .config import GCOV_PREFIX_BASE
 from .fastcov import distillSource
 
+def symlink_gcno_files(build_dir, prefix_dir, verbose=False):
+    if not prefix_dir or prefix_dir == "/":
+        if verbose:
+            print("Empty prefix, early return")
+        return
+
+    build_dir = Path(build_dir).absolute()
+    prefix_dir = Path(prefix_dir).absolute()
+    gcno_files = glob.glob(os.path.join(build_dir, '**', '*.gcno'), recursive=True)
+
+    for f in gcno_files:
+        # Create target directory if it doesn't exist
+        os.makedirs(str(prefix_dir) + os.path.dirname(f), exist_ok=True)
+
+        target_file = str(prefix_dir) + f
+        # Create symlink if it doesn't already exist
+        if not os.path.exists(target_file):
+            os.symlink(f, target_file)
+            if verbose:
+                print(f"Created symlink: {target_file} -> {f}")
+        else:
+            if verbose:
+                print(f"Symlink already exists: {target_file}")
+
+
 def gcov_init(bench_dir):
     shutil.rmtree(GCOV_PREFIX_BASE, ignore_errors=True)
     os.makedirs(GCOV_PREFIX_BASE, exist_ok=True)
@@ -45,21 +70,9 @@ def get_gcov_env(file):
 
     return env
 
-def get_gcda_paths(prefix=GCOV_PREFIX_BASE):
+def get_prefix_files(prefix=GCOV_PREFIX_BASE):
     path_wildcard = os.path.join(prefix, "**/*.gcda")
     return glob.glob(path_wildcard, recursive=True)
-
-def get_prefix_files(prefix=GCOV_PREFIX_BASE):
-    res = list()
-    for p in get_gcda_paths(prefix):
-        # print(f"p: '{str(p)}'")
-        # print(f"prefix: '{str(prefix)}'")
-        # print(f"p woprefix: {p[len(prefix):] if p.startswith(prefix) else p}")
-        file = Path(p[len(prefix):] if p.startswith(prefix) else p)
-        # print(f"{file}")
-        res.append(str(file))
-
-    return res
 
 def process_prefix(prefix, files, verbose=False):
 
@@ -68,17 +81,17 @@ def process_prefix(prefix, files, verbose=False):
     for gcda_file in files:
         env = os.environ.copy()
         env["GCOV_PREFIX"] = prefix
-        print("Gcov GCDA File:" + str(gcda_file))
-        print("Gcov GCDA Prefix:" + str(prefix))
-        print("Gcov Used Path: " + str(prefix + gcda_file))
-        result = subprocess.run(['gcov', '--json', '--stdout', prefix + gcda_file], env=env, check=False, capture_output=True, text=True)
+        if verbose:
+            print("Gcov GCDA File:" + str(gcda_file))
+        result = subprocess.run(['gcov', '--json', '--stdout', gcda_file], env=env, check=False, capture_output=True, text=True)
         next_report = {"sources": {}}
 
         store_noisy_branches = False
-        print("Gcov Exit Code: " + str(result.returncode))
-        print("Gcov Errors: " + str(result.stderr or None))
+        if verbose:
+            print("Gcov Exit Code: " + str(result.returncode))
+            print("Gcov Errors: " + str(result.stderr or None))
+
         source = json.loads(result.stdout)
-        print(f"process_prefix: distilling result:" + str(source)[0:100])
         for f in source["files"]:
             f["file_abs"] = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
             # print(str(f)[0:140])

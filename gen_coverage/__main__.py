@@ -61,7 +61,7 @@ def main():
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sample Size: {sample_size} \tArgs: {args.cvc5_args} \trun: {run_number}/{args.no_runs}")
 
             # The run_benchmark function handles sampling, execution, logging and output generation
-            run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, use_prefix=args.individual)
+            run_benchmark(sample_size, str(bench_dir), args.job_size, cmd, bname, build_dir, use_prefix=args.individual)
 
     # Reset coverage & remove folders
     gcov_cleanup()
