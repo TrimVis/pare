@@ -107,7 +107,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
                 (log, files_report) = future.result()
                 print(log, file=log_file)
                 combine_reports(report, files_report, exec_one=False)
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Combined intermediate results into main result ({i}/{len(futures)})")
+                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Combined intermediate results into main result ({i + 1}/{len(futures)})")
 
     else:
         for file in files:

@@ -75,7 +75,6 @@ def get_prefix_files(prefix=GCOV_PREFIX_BASE):
     return glob.glob(path_wildcard, recursive=True)
 
 def process_prefix(prefix, files, verbose=False):
-
     files_report = { "sources": {} }
     # print(f"process_prefix: len(files) {len(files)}")
     for gcda_file in files:
@@ -93,7 +92,9 @@ def process_prefix(prefix, files, verbose=False):
 
         source = json.loads(result.stdout)
         for f in source["files"]:
-            f["file_abs"] = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
+            f_path = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
+            f_path = f_path[-len(prefix):] if f_path.startswith(prefix) else f_path
+            f["file_abs"] = f_path
             # print(str(f)[0:140])
             distillSource(f, next_report["sources"], "", store_noisy_branches)
 
