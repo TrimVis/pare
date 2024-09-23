@@ -80,6 +80,8 @@ def process_file_batch(file_batch, cmd_arg, build_dir, worker_id=None, use_prefi
         combine_reports(report, freport, exec_one=False)
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Combined intermediate results for worker {worker_id or 0}")
 
+    return (log, report)
+
 
 def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_dir, use_prefix=False):
     """Run the benchmark on sampled files."""
