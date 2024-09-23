@@ -93,9 +93,8 @@ def process_prefix(prefix, files, verbose=False):
         source = json.loads(result.stdout)
         for f in source["files"]:
             f_path = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
-            f_path = f_path[-len(prefix):] if f_path.startswith(prefix) else f_path
+            f_path = f_path[len(prefix):] if f_path.startswith(prefix) else f_path
             f["file_abs"] = f_path
-            # print(str(f)[0:140])
             distillSource(f, next_report["sources"], "", store_noisy_branches)
 
         # Merge files together using our special "per-test" counter

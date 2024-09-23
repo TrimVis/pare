@@ -1,10 +1,7 @@
 import os
 import sys
 import argparse
-import subprocess
 import time
-import json
-import shutil
 import signal
 from pathlib import Path
 
@@ -39,23 +36,20 @@ def main():
     out_dir = Path(args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # cwd = os.getcwd()
-
-    # Change to build directory
-    # os.chdir(build_dir)
-
     sample_sizes = args.sample_size.split(',')
     cvc5_executable = build_dir / 'bin' / 'cvc5'
     if not cvc5_executable.is_file():
         print(f"Error: cvc5 executable not found at {cvc5_executable}")
         sys.exit(1)
 
+    start_time = time.time()
+
     # Reset coverage & create necessary folders
     gcov_init(bench_dir)
 
+    cmd = [str(cvc5_executable)] + args.cvc5_args.split()
     for sample_size in sample_sizes:
         for run_number in range(args.run_start_no, args.no_runs + 1):
-            cmd = [str(cvc5_executable)] + args.cvc5_args.split()
             bname = out_dir / f's{sample_size}_{run_number}'
 
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sample Size: {sample_size} \tArgs: {args.cvc5_args} \trun: {run_number}/{args.no_runs}")
@@ -65,6 +59,12 @@ def main():
 
     # Reset coverage & remove folders
     gcov_cleanup()
+
+    duration = time.time() - start_time
+    duration_h = duration // 3600
+    duration_m = (duration - (3600 * duration_h)) // 60
+    duration_s = duration - (60 * duration_h)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Total Execution Time: {duration_h:2.0f}h{duration_m:2.0f}m{duration_s:2.0f}s")
 
 
     print("exit")

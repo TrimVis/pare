@@ -1,5 +1,29 @@
+import glob
+import os
+import sys
+import random
 import hashlib
-from pathlib import Path
+
+def sample_files(sample_size, benchmark_dir):
+    """Sample files from the benchmark directory."""
+    # Verify if the benchmark directory exists
+    if not os.path.isdir(benchmark_dir):
+        print(f"Error: Directory {benchmark_dir} does not exist.")
+        sys.exit(1)
+    
+    # Collect all files with .smt extension
+    all_files = glob.glob(os.path.join(benchmark_dir, "**/*.smt2"), recursive=True)
+    total_files = len(all_files)
+    
+    if sample_size == 'all':
+        random.shuffle(all_files)
+        return all_files
+    else:
+        sample_size_int = int(sample_size)
+        if sample_size_int > total_files:
+            print(f"Error: Requested sample size ({sample_size_int}) is greater than the total number of files ({total_files}) in the directory.")
+            sys.exit(1)
+        return random.sample(all_files, sample_size_int)
 
 def combine_dicts(dict1, dict2):
     """Add dicts together by value. i.e. addDicts({"a":1,"b":0}, {"a":2}) == {"a":3,"b":0}."""
