@@ -101,6 +101,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
     with open(f"{bname}_coverage.json", "w") as f:
         json.dump(report, f)
 
+    log_file.flush()
     log_file.close()
 
 
