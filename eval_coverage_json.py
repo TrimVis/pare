@@ -39,7 +39,7 @@ _prev_results = {}
 
 def _lookup_function_name(src_code: str, file_path: str, line_no: int) -> str:
     if not src_code:
-        return "-"
+        return (None, (0,0))
 
     global _prev_file_path, _prev_cpp_code, _prev_tree, _prev_results
     result_key = (file_path, line_no)
@@ -53,14 +53,16 @@ def _lookup_function_name(src_code: str, file_path: str, line_no: int) -> str:
         cpp_code = _prev_cpp_code
         tree = _prev_tree
     else:
-        with open(full_path, 'rb') as f:
-            cpp_code = f.read()
-            parser.reset()
-            tree = parser.parse(cpp_code, encoding="utf8")
-            _prev_file_path = file_path
-            _prev_cpp_code = cpp_code
-            _prev_tree = tree
-
+        try:
+            with open(full_path, 'rb') as f:
+                cpp_code = f.read()
+                parser.reset()
+                tree = parser.parse(cpp_code, encoding="utf8")
+                _prev_file_path = file_path
+                _prev_cpp_code = cpp_code
+                _prev_tree = tree
+        except FileNotFoundError:
+            return (None, (0,0))
     def find_function(node):
         if node.start_point[0] + 1 == line_no and node.type == 'function_definition':
             frange = (node.start_point[0] + 1, node.end_point[0] + 1)
@@ -389,8 +391,8 @@ class Plotter:
             df['category'] = 'all'
             df_combined = df
 
-        colors = ['red', 'green', 'blue', 'purple', 'magenta', 'yellow', 'black']
-        quantiles_s = [0.99, 0.95, 0.90, 0.50, 0.10, 0.05, 0.01]
+        colors = ['red', 'green', 'blue', 'purple', 'magenta', 'yellow', 'black', 'red', 'red', 'red', 'red', 'red', 'red']
+        quantiles_s = [0.99, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.25, 0.20, 0.15, 0.10, 0.05, 0.01]
         logger.info(f"Creating quantile lines ({[f'{round(100*q)}%' for q in quantiles_s]})")
         quantiles_v = df['execution_count'].quantile(quantiles_s)
         quantiles = pd.DataFrame({
@@ -451,8 +453,8 @@ class Plotter:
             df['category'] = 'all'
             df_combined = df
 
-        colors = ['red', 'green', 'blue', 'purple', 'magenta', 'yellow', 'black']
-        quantiles_s = [0.99, 0.95, 0.90, 0.50, 0.10, 0.05, 0.01]
+        colors = ['red', 'green', 'blue', 'purple', 'magenta', 'yellow', 'black', 'red', 'red', 'red', 'red', 'red', 'red']
+        quantiles_s = [0.99, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.25, 0.20, 0.15, 0.10, 0.05, 0.01]
         logger.info(f"Creating quantile lines ({[f'{round(100*q)}%' for q in quantiles_s]})")
         quantiles_v = df['execution_count'].quantile(quantiles_s)
         quantiles = pd.DataFrame({
