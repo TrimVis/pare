@@ -64,10 +64,7 @@ def main():
     duration_h = duration // 3600
     duration_m = (duration - (3600 * duration_h)) // 60
     duration_s = duration - (60 * duration_h)
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Total Execution Time: {duration_h:2.0f}h{duration_m:2.0f}m{duration_s:2.0f}s")
-
-
-    print("exit")
+    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Overall Runtime: {duration_h:2.0f}h{duration_m:2.0f}m{duration_s:2.0f}s")
 
 if __name__ == '__main__':
     main()

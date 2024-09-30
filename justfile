@@ -34,7 +34,7 @@ setup:
 gen_report TLIMIT="4000" SAMPLE="all" CORES=num_cpus(): setup
     {{ python }} -m gen_coverage \
         -i \
-        -n "{{SAMPLE}}" -j {{nojobs}} \
+        -n "{{SAMPLE}}" -j {{CORES}} \
         -b ../cvc5-repo/build/ \
         -a "--tlimit {{TLIMIT}}" \
         "{{benchdir}}" \

@@ -8,8 +8,8 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
+from . import GCOV_PREFIX_BASE
 from .utils import combine_reports
-from .config import GCOV_PREFIX_BASE
 from .fastcov import distillSource
 
 def symlink_gcno_files(build_dir, prefix_dir, verbose=False):

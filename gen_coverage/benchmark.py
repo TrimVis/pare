@@ -8,7 +8,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .gcov import get_gcov_env, process_prefix, get_prefix, get_prefix_files, combine_reports, symlink_gcno_files
 from .utils import sample_files
-from .config import MIN_JOB_SIZE, PROGRESS_MANAGER
+from . import MIN_JOB_SIZE, PROGRESS_MANAGER
 
 def process_file(file, cmd_arg, build_dir, batch_id=None, use_prefix=False, verbose=False):
     """Process a single file with the given command."""
@@ -75,12 +75,13 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
     log_file.write(f"Running benchmark on {sample_size} test files in {benchmark_dir}\n")
     log_file.write("\n-------------------------------------\n")
 
+    start_time = time.time()
 
     # Run commands either in parallel or sequentially
     if job_size > 1:
         batch_size = max(job_size, math.ceil(len(files) / MIN_JOB_SIZE))
         file_batches = [files[i::batch_size] for i in range(batch_size)]
-        pbar = pmanager.counter(total=len(file_batches), desc='file batches', unit='batch')
+        pbar = PROGRESS_MANAGER.counter(total=len(file_batches), desc='file batches', unit='batch')
 
         with ProcessPoolExecutor(max_workers=job_size) as executor:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing of {len(file_batches)} batches (exp. batch_size: {len((file_batches[0:1] or [])[0])}) in {job_size} processes starts now...")
@@ -95,7 +96,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Finished batch {i + 1} of {future_len} (batch_size: {batch_size})")
 
     else:
-        pbar = pmanager.counter(total=len(files), desc='files', unit='file')
+        pbar = PROGRESS_MANAGER.counter(total=len(files), desc='files', unit='file')
         for file in files:
             (log, files_report) = process_file(file, cmd_arg, build_dir, None, use_prefix=use_prefix)
             log_file.write(log + '\n')
@@ -104,6 +105,20 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
 
     with open(f"{bname}_coverage.json", "w") as f:
         json.dump(report, f)
+
+    duration = (time.time() - start_time)
+    msg = f"=> Total Benchmark Runtime: {duration:.2f}s"
+    log_file.write(msg + '\n')
+    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+    if job_size > 1:
+        msg = f"=> Avg. Benchmark Runtimes: {(duration / len(files)):.2f} s/file {duration / len(file_batches):.2f} s/batch"
+        log_file.write(msg + '\n')
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+    else:
+        msg = f"=> Avg. Runtime: {(duration / len(files)):.2f} s/file"
+        log_file.write(msg + '\n')
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+
 
     log_file.flush()
     log_file.close()
