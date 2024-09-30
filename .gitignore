@@ -1,6 +1,9 @@
 /benchmarks/
 /benchmark_runs/
+/reports/
 /venv/
+/.venv/
+/old/
 __pycache__
 *.json
 *.csv

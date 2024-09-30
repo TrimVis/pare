@@ -32,13 +32,14 @@ setup:
 
 # Generate a coverage report
 gen_report TLIMIT="4000" SAMPLE="all" CORES=num_cpus(): setup
-    time {{ python }} -m gen_coverage \
+    {{ python }} -m gen_coverage \
         -i \
         -n "{{SAMPLE}}" -j {{nojobs}} \
         -b ../cvc5-repo/build/ \
         -a "--tlimit {{TLIMIT}}" \
         "{{benchdir}}" \
         "{{reportsdir}}/tlimit{{TLIMIT}}"
+    @echo "Created report at '{{reportsdir}}/tlimit{{TLIMIT}}'"
 
 # Evaluate a coverage report
 eval_report COVERAGE_FILE=(reportsdir / "tlimit4000/sall_1_coverage.json"): setup
