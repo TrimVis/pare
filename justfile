@@ -4,6 +4,7 @@ cvc5repo := "git@github.com:TrimVis/master-tiny-cvc5.git"
 cvc5git := cvc5dir / ".git"
 cvc5build := cvc5dir / "build"
 
+benchurl := "https://zenodo.org/api/records/11061097/files-archive"
 benchdir := "benchmarks/nonincremental_2024.04.23/non-incremental/"
 reportsdir := "reports"
 
@@ -13,6 +14,13 @@ python := ".venv/bin/python3"
 alias b := build
 alias g := gen_report
 alias e := eval_report
+
+# TODO pjordan: Add this
+# download_bench:
+#     mkdir -p "{{benchdir}}"
+#     wget "{{benchurl}}" -o benchmark.tar
+#     tar -xf *.tar.zst
+
 
 # Clones and builds cvc5 with coverage support
 build:

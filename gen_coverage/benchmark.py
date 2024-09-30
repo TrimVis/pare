@@ -68,12 +68,15 @@ def process_file_batch(file_batch, cmd_arg, build_dir, batch_id=None, use_prefix
 def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_dir, use_prefix=False, verbose=False):
     """Run the benchmark on sampled files."""
     report = { "sources": {} }
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Retrieving files to be benchmarked... (file count: {sample_size})")
     files = sample_files(sample_size, benchmark_dir)
     log_path = Path(f"{bname}.log")
     log_file = open(log_path, 'w')
 
     log_file.write(f"Running benchmark on {sample_size} test files in {benchmark_dir}\n")
     log_file.write("\n-------------------------------------\n")
+    
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting benchmarks...")
 
     start_time = time.time()
 
@@ -81,7 +84,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
     if job_size > 1:
         batch_size = max(job_size, math.ceil(len(files) / MIN_JOB_SIZE))
         file_batches = [files[i::batch_size] for i in range(batch_size)]
-        pbar = PROGRESS_MANAGER.counter(total=len(file_batches), desc='file batches', unit='batch')
+        pbar = PROGRESS_MANAGER.counter(total=len(file_batches), desc='Processing batches', unit='batches')
 
         with ProcessPoolExecutor(max_workers=job_size) as executor:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing of {len(file_batches)} batches (exp. batch_size: {len((file_batches[0:1] or [])[0])}) in {job_size} processes starts now...")
@@ -96,7 +99,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Finished batch {i + 1} of {future_len} (batch_size: {batch_size})")
 
     else:
-        pbar = PROGRESS_MANAGER.counter(total=len(files), desc='files', unit='file')
+        pbar = PROGRESS_MANAGER.counter(total=len(files), desc='Processing files', unit='files')
         for file in files:
             (log, files_report) = process_file(file, cmd_arg, build_dir, None, use_prefix=use_prefix)
             log_file.write(log + '\n')
