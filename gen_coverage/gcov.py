@@ -74,27 +74,40 @@ def get_prefix_files(prefix=GCOV_PREFIX_BASE):
     path_wildcard = os.path.join(prefix, "**/*.gcda")
     return glob.glob(path_wildcard, recursive=True)
 
-def process_prefix(prefix, files, verbose=False):
+def process_prefix(prefix, files, src_dir, verbose=False):
     files_report = { "sources": {} }
     # print(f"process_prefix: len(files) {len(files)}")
+    # print(f"files in prefix: {files[0:10]}")
     for gcda_file in files:
         env = os.environ.copy()
         env["GCOV_PREFIX"] = prefix
         if verbose:
             print("Gcov GCDA File:" + str(gcda_file))
         result = subprocess.run(['gcov', '--json', '--stdout', gcda_file], env=env, check=False, capture_output=True, text=True)
-        next_report = {"sources": {}}
 
-        store_noisy_branches = False
         if verbose:
             print("Gcov Exit Code: " + str(result.returncode))
             print("Gcov Errors: " + str(result.stderr or None))
 
+        next_report = {"sources": {}}
         source = json.loads(result.stdout)
+        store_noisy_branches = False
+
+        # if len(source["files"]):
+        #     print(source["files"][0:10])
+        # else:
+        #     print(source)
         for f in source["files"]:
-            f_path = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
-            f_path = f_path[len(prefix):] if f_path.startswith(prefix) else f_path
-            f["file_abs"] = f_path
+
+            # f_path = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
+            # f_path = f_path[len(prefix):] if f_path.startswith(prefix) else f_path
+            # f["file_abs"] = f_path
+
+            # print(f"file: {f['file']}")
+            # print(f"src_dir: {src_dir}")
+            f["file_abs"] = os.path.abspath(os.path.join(src_dir, f["file"]))
+            # print(f"file_abs: {f['file_abs']}")
+
             distillSource(f, next_report["sources"], "", store_noisy_branches)
 
         # Merge files together using our special "per-test" counter

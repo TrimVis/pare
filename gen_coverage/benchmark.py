@@ -39,7 +39,7 @@ def process_file(file, cmd_arg, build_dir, batch_id=None, use_prefix=False, verb
     prefix = get_prefix(file)
     files = get_prefix_files(prefix)
     symlink_gcno_files(build_dir, prefix)
-    files_report = process_prefix(prefix, files)
+    files_report = process_prefix(prefix, files, Path(build_dir).parent)
 
     # Delete the folder to keep storage available
     shutil.rmtree(prefix)
