@@ -14,6 +14,7 @@ python := ".venv/bin/python3"
 alias b := build
 alias g := gen_report
 alias e := eval_report
+alias o := optimize
 
 # TODO pjordan: Add this
 # download_bench:
@@ -52,3 +53,7 @@ gen_report TLIMIT="4000" SAMPLE="all" CORES=num_cpus(): setup
 # Evaluate a coverage report
 eval_report COVERAGE_FILE=(reportsdir / "tlimit4000/sall_1_coverage.json"): setup
     {{ python }} eval_coverage_json.py db generate --input={{COVERAGE_FILE}} --src_code={{ cvc5dir }}
+
+# Optimize 
+optimize: setup
+    {{ python }} optimization.py
