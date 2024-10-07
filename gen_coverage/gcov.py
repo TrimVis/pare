@@ -97,7 +97,7 @@ def process_prefix(prefix, files, src_dir, verbose=False):
             f["file_abs"] = os.path.abspath(os.path.join(src_dir, f["file"]))
 
             if f["file_abs"].startswith('/usr/include/'):
-                print(f"Ignoring system library file {f['file_abs']}")
+                # print(f"Ignoring system library file {f['file_abs']}")
                 continue
 
             distillSource(f, next_report["sources"], "", store_noisy_branches)

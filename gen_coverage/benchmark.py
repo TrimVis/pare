@@ -4,7 +4,8 @@ import subprocess
 import json
 import math
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from loky import get_reusable_executor
+from concurrent.futures import as_completed
 
 from .gcov import get_gcov_env, process_prefix, get_prefix, get_prefix_files, combine_reports, symlink_gcno_files
 from .utils import sample_files
@@ -86,7 +87,7 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
         file_batches = [files[i::batch_size] for i in range(batch_size)]
         pbar = PROGRESS_MANAGER.counter(total=len(file_batches), desc='Processing batches', unit='batches')
 
-        with ProcessPoolExecutor(max_workers=job_size) as executor:
+        with get_reusable_executor(max_workers=job_size) as executor:
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing of {len(file_batches)} batches (exp. batch_size: {len((file_batches[0:1] or [])[0])}) in {job_size} processes starts now...")
             futures = { executor.submit(process_file_batch, batch, cmd_arg, build_dir, batch_id, use_prefix): batch_id 
                         for batch_id, batch in enumerate(file_batches)}
