@@ -93,20 +93,12 @@ def process_prefix(prefix, files, src_dir, verbose=False):
         source = json.loads(result.stdout)
         store_noisy_branches = False
 
-        # if len(source["files"]):
-        #     print(source["files"][0:10])
-        # else:
-        #     print(source)
         for f in source["files"]:
-
-            # f_path = gcda_file[:-5] if gcda_file.endswith(".gcda") else gcda_file
-            # f_path = f_path[len(prefix):] if f_path.startswith(prefix) else f_path
-            # f["file_abs"] = f_path
-
-            # print(f"file: {f['file']}")
-            # print(f"src_dir: {src_dir}")
             f["file_abs"] = os.path.abspath(os.path.join(src_dir, f["file"]))
-            # print(f"file_abs: {f['file_abs']}")
+
+            if f["file_abs"].startswith('/usr/include/'):
+                print(f"Ignoring system library file {f['file_abs']}")
+                continue
 
             distillSource(f, next_report["sources"], "", store_noisy_branches)
 
