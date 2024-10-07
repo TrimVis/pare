@@ -9,10 +9,10 @@ def distillFunction(function_raw, functions):
     if function_name not in functions:
         functions[function_name] = {
             "start_line": start_line,
-            "execution_count": execution_count
+            "run_count": execution_count
         }
     else:
-        functions[function_name]["execution_count"] += execution_count
+        functions[function_name]["run_count"] += execution_count
 
 def emptyBranchSet(branch1, branch2):
     return (branch1["count"] == 0 and branch2["count"] == 0)

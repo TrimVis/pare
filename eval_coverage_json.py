@@ -143,7 +143,7 @@ class JsonAnalyzer:
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
-        res_header = ["uid", "execution_count", "file_path", "line_no"]
+        res_header = ["uid", "run_count", "file_path", "line_no"]
         res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "INTEGER"]
         res_data = [  ]
 
@@ -153,10 +153,10 @@ class JsonAnalyzer:
             value = value[""]
             lines = value["lines"]
             cleaned_path = _clean_path(path)
-            for (line_no, exec_count) in lines.items():
+            for (line_no, run_count) in lines.items():
                 uid = f"{cleaned_path}:{line_no}"
                 res_data.append(
-                    [uid, exec_count, cleaned_path, line_no]
+                    [uid, run_count, cleaned_path, line_no]
                 )
             pbar.update()
         pbar.close()
@@ -164,7 +164,7 @@ class JsonAnalyzer:
         # Sort the result data, if wanted
         if sort:
             reverse_sort = sort.lower() if isinstance(sort, str) else False
-            logger.info(f"Sorting usage data by execution count in {'descending' if reverse_sort else 'ascending'} order")
+            logger.info(f"Sorting usage data by run count in {'descending' if reverse_sort else 'ascending'} order")
             key_fn = lambda i: i[1]
             res_data.sort(key=key_fn, reverse=reverse_sort)
 
@@ -177,7 +177,7 @@ class JsonAnalyzer:
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
-        res_header = ["uid", "execution_count", "file", "func_name", "start_line", "end_line"]
+        res_header = ["uid", "run_count", "file", "func_name", "start_line", "end_line"]
         res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER", "INTEGER"]
         res_data = [  ]
 
@@ -191,12 +191,12 @@ class JsonAnalyzer:
             cleaned_path = _clean_path(path)
 
             for (func_id, func_value) in functions.items():
-                exec_count = func_value["execution_count"]
+                run_count = func_value["run_count"]
 
                 (func_name, frange) = _lookup_function_name(src_code, cleaned_path, func_value["start_line"])
                 uid = f"{cleaned_path}:{func_id}"
                 res_data.append(
-                    [uid, exec_count, cleaned_path, func_name, frange[0], frange[1]]
+                    [uid, run_count, cleaned_path, func_name, frange[0], frange[1]]
                 )
 
             pbar.update()
@@ -205,7 +205,7 @@ class JsonAnalyzer:
         # Sort the result data, if wanted
         if sort:
             reverse_sort = sort.lower() if isinstance(sort, str) else False
-            logger.info(f"Sorting usage data by function execution count in {'descending' if reverse_sort else 'ascending'} order")
+            logger.info(f"Sorting usage data by function run count in {'descending' if reverse_sort else 'ascending'} order")
             key_fn = lambda i: i[1]
             res_data.sort(key=key_fn, reverse=reverse_sort)
 
@@ -219,7 +219,7 @@ class JsonAnalyzer:
         d = _read_json(input)
         src_code = src_code.rstrip("/").rstrip("src")
 
-        res_header = ["uid", "execution_count", "file", "func_name", "line_no", "func_no_lines"]
+        res_header = ["uid", "run_count", "file", "func_name", "line_no", "func_no_lines"]
         res_sqlite_types = ["TEXT PRIMARY KEY", "INTEGER", "TEXT", "TEXT", "INTEGER", "INTEGER"]
         res_data = [  ]
         
@@ -241,7 +241,7 @@ class JsonAnalyzer:
 
             curr_func_i = 0
             f_data = []
-            for (line_no, exec_count) in lines.items():
+            for (line_no, run_count) in lines.items():
 
                 # Check if line falls into next function
                 if curr_func_i < (len(func_line_map) - 1) and int(line_no) >= int(func_line_map[curr_func_i][3]):
@@ -250,7 +250,7 @@ class JsonAnalyzer:
                 (func_path, func_id, func_name, func_start, func_end) = func_line_map[curr_func_i]
                 uid = f"{func_path}:{func_id}:l{line_no}"
                 res_data.append(
-                    [uid, exec_count, func_path, func_name, line_no, func_end - func_start if func_end != -1 else -1]
+                    [uid, run_count, func_path, func_name, line_no, func_end - func_start if func_end != -1 else -1]
                 )
 
             pbar.update()
@@ -259,7 +259,7 @@ class JsonAnalyzer:
         # Sort the result data, if wanted
         if sort:
             reverse_sort = sort.lower() if isinstance(sort, str) else False
-            logger.info(f"Sorting usage data by execution count in {'descending' if reverse_sort else 'ascending'} order")
+            logger.info(f"Sorting usage data by run count in {'descending' if reverse_sort else 'ascending'} order")
             key_fn = lambda i: i[1]
             res_data.sort(key=key_fn, reverse=reverse_sort)
 
@@ -357,7 +357,7 @@ class Plotter:
         # Get all entries
         query = f"SELECT * FROM {table_name}"
         if cutoff:
-            query += f" WHERE execution_count > {cutoff}"
+            query += f" WHERE run_count > {cutoff}"
         cur.execute(query)
         data = cur.fetchall()
 
@@ -394,9 +394,9 @@ class Plotter:
         colors = ['red', 'green', 'blue', 'purple', 'magenta', 'yellow', 'black', 'red', 'red', 'red', 'red', 'red', 'red']
         quantiles_s = [0.99, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.25, 0.20, 0.15, 0.10, 0.05, 0.01]
         logger.info(f"Creating quantile lines ({[f'{round(100*q)}%' for q in quantiles_s]})")
-        quantiles_v = df['execution_count'].quantile(quantiles_s)
+        quantiles_v = df['run_count'].quantile(quantiles_s)
         quantiles = pd.DataFrame({
-            'Percentile': [f'{(100*q):02.0f} Percentile (y={round(quantiles_v[q])}) (Below: {round((df['execution_count'] < quantiles_v[q]).sum())})' for q in quantiles_s],
+            'Percentile': [f'{(100*q):02.0f} Percentile (y={round(quantiles_v[q])}) (Below: {round((df['run_count'] < quantiles_v[q]).sum())})' for q in quantiles_s],
             'y': quantiles_v,
             'color': colors[:len(quantiles_s)]
         })
@@ -406,12 +406,12 @@ class Plotter:
         if cutoff is not None:
             title += f" (Count >= {cutoff})"
         plot = (
-            ggplot(df_combined, aes(x=df_combined.index, y='execution_count')) +
+            ggplot(df_combined, aes(x=df_combined.index, y='run_count')) +
             geom_point(color="steelblue") +
             geom_hline(quantiles, aes(yintercept='y', color='Percentile'), linetype="dashed", size=1) +
             facet_wrap('~category', scales='free_x') +
             theme_minimal() +
-            labs(title=title , x="Index", y="Execution Count") +
+            labs(title=title , x="Index", y="Run Count") +
             scale_color_manual(values=dict(zip(quantiles['Percentile'], quantiles['color'])))
         )
         if log_scale:
@@ -456,9 +456,9 @@ class Plotter:
         colors = ['red', 'green', 'blue', 'purple', 'magenta', 'yellow', 'black', 'red', 'red', 'red', 'red', 'red', 'red']
         quantiles_s = [0.99, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50, 0.25, 0.20, 0.15, 0.10, 0.05, 0.01]
         logger.info(f"Creating quantile lines ({[f'{round(100*q)}%' for q in quantiles_s]})")
-        quantiles_v = df['execution_count'].quantile(quantiles_s)
+        quantiles_v = df['run_count'].quantile(quantiles_s)
         quantiles = pd.DataFrame({
-            'Percentile': [f'{(100*q):02.0f} Percentile (y={round(quantiles_v[q])}) (Below: {round((df['execution_count'] < quantiles_v[q]).sum())})' for q in quantiles_s],
+            'Percentile': [f'{(100*q):02.0f} Percentile (y={round(quantiles_v[q])}) (Below: {round((df['run_count'] < quantiles_v[q]).sum())})' for q in quantiles_s],
             'y': quantiles_v,
             'color': colors[:len(quantiles_s)]
         })
@@ -468,12 +468,12 @@ class Plotter:
         if cutoff is not None:
             title += f" (Count >= {cutoff})"
         plot = (
-            ggplot(df_combined, aes(x=df_combined.index, y='execution_count')) +
+            ggplot(df_combined, aes(x=df_combined.index, y='run_count')) +
             geom_point(color="steelblue") +
             geom_hline(quantiles, aes(yintercept='y', color='Percentile'), linetype="dashed", size=1) +
             facet_wrap('~category', scales='free_x') +
             theme_minimal() +
-            labs(title=title , x="Index", y="Execution Count") +
+            labs(title=title , x="Index", y="Run Count") +
             scale_color_manual(values=dict(zip(quantiles['Percentile'], quantiles['color'])))
         )
         if log_scale:
@@ -525,14 +525,14 @@ class Plotter:
         df["parent folder"] = df["file"].apply(_shorten_path_cblk(group_depth))
 
         logger.info(f"Creating plot")
-        title ="Distribution of Function Length against Executions"
+        title ="Distribution of Function Length against Runs"
         if cutoff is not None:
             title += f" (Count >= {cutoff})"
         plot = (
-            ggplot(df, aes(x='execution_count', y='func_no_lines', color="parent folder")) +
+            ggplot(df, aes(x='run_count', y='func_no_lines', color="parent folder")) +
             geom_point() +
             theme_minimal() +
-            labs(title=title , x="Execution Count", y="No Lines of Function")
+            labs(title=title , x="Run Count", y="No Lines of Function")
         )
         if log_scale:
             plot = plot + scale_y_log10()
@@ -546,14 +546,14 @@ class Plotter:
 
     def fline_usage(self, db_file: str="./coverage_db.sqlite", output: str=None, cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False, group_depth: int = 2):
         (res_data, res_header) = self._read_from_db(db_file, "fline", cutoff)
-        ["uid", "execution_count", "file", "func_name", "line_no", "func_no_lines"]
+        ["uid", "run_count", "file", "func_name", "line_no", "func_no_lines"]
         df = pd.DataFrame(res_data, columns=res_header)
 
         # Ensure the data is sorted by func_name and func_no_lines
         df = df.sort_values(by=['file', 'func_name', 'line_no'])
 
         df["fid"] = df["file"] + "::" + df["func_name"]
-        df["execution count diff"] = df["execution_count"].diff()
+        df["run count diff"] = df["run_count"].diff()
 
         df["parent_folder"] = df["file"].apply(_shorten_path_cblk(group_depth))
 
@@ -562,12 +562,12 @@ class Plotter:
         if cutoff is not None:
             title += f" (Count >= {cutoff})"
         plot = (
-            ggplot(df, aes(x='line_no', y='execution_count', color="fid")) +
+            ggplot(df, aes(x='line_no', y='run_count', color="fid")) +
             geom_line() +
             theme_minimal() +
             theme(legend_position='none') +
             facet_wrap('~parent_folder', scales='free') +
-            labs(title=title , x="Line of Function", y="Execution Count")
+            labs(title=title , x="Line of Function", y="Run Count")
         )
         if log_scale:
             plot = plot + scale_y_log10()

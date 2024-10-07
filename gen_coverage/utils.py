@@ -80,9 +80,9 @@ def combine_reports(base, overlay, exec_one=False):
 
             for function, cov in tcov["functions"].items():
                 if exec_one:
-                    cov["execution_count"] = 1 if cov["execution_count"] else 0
+                    cov["run_count"] = 1 if cov["run_count"] else 0
 
                 if function not in base_data["functions"]:
                     base_data["functions"][function] = cov
                 else:
-                    base_data["functions"][function]["execution_count"] += cov["execution_count"]
+                    base_data["functions"][function]["run_count"] += cov["run_count"]
