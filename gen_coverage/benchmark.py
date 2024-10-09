@@ -3,13 +3,15 @@ import shutil
 import subprocess
 import json
 import math
+import gc
+from itertools import islice
 from pathlib import Path
 from loky import get_reusable_executor
 from concurrent.futures import as_completed
 
 from .gcov import get_gcov_env, process_prefix, get_prefix, get_prefix_files, combine_reports, symlink_gcno_files
 from .utils import sample_files
-from . import MIN_JOB_SIZE, PROGRESS_MANAGER
+from . import MIN_JOB_SIZE, PROGRESS_MANAGER, EXECUTOR
 
 def process_file(file, cmd_arg, build_dir, batch_id=None, use_prefix=False, verbose=False):
     """Process a single file with the given command."""
@@ -83,29 +85,63 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
 
     # Run commands either in parallel or sequentially
     if job_size > 1:
+        # Process batches additionally in chunks to reduce the memory footprint
         batch_size = max(job_size, math.ceil(len(files) / MIN_JOB_SIZE))
-        file_batches = [files[i::batch_size] for i in range(batch_size)]
-        pbar = PROGRESS_MANAGER.counter(total=len(file_batches), desc='Processing batches', unit='batches')
+        file_batches = [(i, files[i::batch_size]) for i in range(batch_size)]
+        batch_queue = iter(file_batches)
 
-        with get_reusable_executor(max_workers=job_size) as executor:
-            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing of {len(file_batches)} batches (exp. batch_size: {len((file_batches[0:1] or [])[0])}) in {job_size} processes starts now...")
-            futures = { executor.submit(process_file_batch, batch, cmd_arg, build_dir, batch_id, use_prefix): batch_id 
-                        for batch_id, batch in enumerate(file_batches)}
-            future_len = len(futures)
-            for i, future in enumerate(as_completed(futures)):
-                (log, files_report, batch_size) = future.result()
-                log_file.write(log + '\n')
-                combine_reports(report, files_report, exec_one=False)
-                pbar.update()
-                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Finished batch {i + 1} of {future_len} (batch_size: {batch_size})")
+        batch_bar = PROGRESS_MANAGER.counter(total=len(file_batches), desc='Processing batches', unit='batches')
 
+        executor = get_reusable_executor(max_workers=job_size)
+        # Remember the executor, so we can properly terminate on Ctrl+C
+        global EXECUTOR
+        EXECUTOR = executor
+
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Processing of {len(file_batches)} batches (exp. batch_size: {len((file_batches[0:1] or [])[0])}) in {job_size} processes starts now...")
+        futures = { executor.submit(process_file_batch, batch, cmd_arg, build_dir, batch_id, use_prefix): batch_id 
+                   for (batch_id, batch) in islice(batch_queue, job_size + 2)}
+        total_future_len = len(file_batches)
+        while futures or batch_queue:
+            i = 0
+            for future in as_completed(futures):
+                batch_id = futures[future]
+                try:
+                    (log, files_report, batch_size) = future.result()
+                    log_file.write(log + '\n')
+                    combine_reports(report, files_report, exec_one=False)
+                    batch_bar.update()
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Finished batch {batch_id} of {total_future_len} (batch_size: {batch_size})")
+                except Exception as e:
+                    print(f"Batch {batch_id} failed with error: {e}")
+
+                del futures[future]
+
+                try:
+                    print("Adding new batch")
+                    (next_batch_id, next_batch) = next(batch_queue)
+                    new_future = executor.submit(process_file_batch, next_batch, cmd_arg, build_dir, next_batch_id, use_prefix)
+                    futures[new_future] = next_batch_id
+                    print("Added new batch")
+                except StopIteration:
+                    batch_queue = None
+                    print("Stopping all batches done")
+                    # No more batches left, break the loop
+                    pass
+
+                # Garbage collect manually, as the main thread does not run often
+                if i % 3 == 0:
+                    gc.collect()
+                i += 1
+
+        # Cleanup
+        executor.shutdown(wait=True)
     else:
-        pbar = PROGRESS_MANAGER.counter(total=len(files), desc='Processing files', unit='files')
+        batch_bar = PROGRESS_MANAGER.counter(total=len(files), desc='Processing files', unit='files')
         for file in files:
             (log, files_report) = process_file(file, cmd_arg, build_dir, None, use_prefix=use_prefix)
             log_file.write(log + '\n')
             combine_reports(report, files_report, exec_one=False)
-            pbar.update()
+            batch_bar.update()
 
     with open(f"{bname}_coverage.json", "w") as f:
         json.dump(report, f)

@@ -5,11 +5,19 @@ import time
 import signal
 from pathlib import Path
 
+from . import TRACE_MEMUSAGE, EXECUTOR
 from .benchmark import run_benchmark
 from .gcov import gcov_init, gcov_cleanup
 
+if TRACE_MEMUSAGE:
+    import tracemalloc
+
+executor = None
 def handle_interrupt(signum, frame):
-    print("Interrupt received, stopping the script.")
+    print("Interrupt received, stopping all subprocesses.")
+    if EXECUTOR:
+        EXECUTOR.shutdown(wait=True)
+    print("Terminating.")
     sys.exit(1)
 
 
@@ -29,6 +37,9 @@ def main():
     parser.add_argument('benchmark_dir', help='Benchmark directory')
     parser.add_argument('output_dir', help='Output directory')
     args = parser.parse_args()
+
+    if TRACE_MEMUSAGE:
+        tracemalloc.start()
 
     out = sys.stdout if args.verbose else open(os.devnull, 'w')
     build_dir = Path(args.build_dir).resolve()
@@ -65,6 +76,14 @@ def main():
     duration_m = (duration - (3600 * duration_h)) // 60
     duration_s = duration - (60 * duration_h)
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Overall Runtime: {duration_h:2.0f}h{duration_m:2.0f}m{duration_s:2.0f}s")
+
+    if TRACE_MEMUSAGE:
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+
+        print("[ Top 30 memory consuming lines ]")
+        for stat in top_stats[:30]:
+            print(stat)
 
 if __name__ == '__main__':
     main()
