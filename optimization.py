@@ -25,7 +25,9 @@ def main():
             # Minimize the total number of alive code
             m.setObjective(sum(l[i] * f[i] for i in range(n)), GRB.MINIMIZE)
 
-            m.addConstr(sum(c[i] * f[i] for i in range(n)) >=  p * sum(l), "c0")
+            # m.addConstr(sum(c[i] * f[i] for i in range(n)) >=  p * sum(l), "c0")
+            # m.addConstr(sum(c[i] * f[i] for i in range(n)) / n >=  p * no_benchs, "c0")
+            m.addConstr(sum(c[i] * f[i] for i in range(n)) >=  p * no_benchs, "c0")
 
             # Optimize model
             m.optimize()
