@@ -117,14 +117,12 @@ def run_benchmark(sample_size, benchmark_dir, job_size, cmd_arg, bname, build_di
                 del futures[future]
 
                 try:
-                    print("Adding new batch")
                     (next_batch_id, next_batch) = next(batch_queue)
                     new_future = executor.submit(process_file_batch, next_batch, cmd_arg, build_dir, next_batch_id, use_prefix)
                     futures[new_future] = next_batch_id
-                    print("Added new batch")
                 except StopIteration:
                     batch_queue = None
-                    print("Stopping all batches done")
+                    print("All batches done. Stopping...")
                     # No more batches left, break the loop
                     pass
 
