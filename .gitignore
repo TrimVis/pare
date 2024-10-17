@@ -4,6 +4,7 @@
 /venv/
 /.venv/
 /old/
+target/
 __pycache__
 *.json
 *.csv
