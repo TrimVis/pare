@@ -1,17 +1,20 @@
 mod args;
 mod benchmark;
+mod db;
 mod fastcov;
 mod gcov;
 mod utils;
+
+mod gcov_worker;
 
 use crate::args::ARGS;
 use std::time::Instant;
 
 use fern::Dispatch;
 use log::{error, info, warn};
-use std::fs;
-use std::fs::File;
-use std::path::Path;
+use std::fs::{create_dir_all, File};
+
+type ResultT<T> = Result<T, Box<dyn std::error::Error>>;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup logger
@@ -28,37 +31,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .chain(File::create(&ARGS.log_file)?) // log to file
         .apply()?;
 
+    assert!(!ARGS.result_db.exists(), "DB file already exists.");
+
     let start = Instant::now();
+
+    // Ensure directory in which result db will live exists
+    let out_dir = ARGS.result_db.parent().unwrap().canonicalize().unwrap();
+    create_dir_all(out_dir).unwrap();
 
     gcov::init()?;
 
-    let out_dir = ARGS.output_dir.canonicalize().unwrap();
-    let out_dir = Path::new(&out_dir);
-    fs::create_dir_all(out_dir).unwrap();
+    info!(
+        "Sample Size: {} \tArgs: {}",
+        ARGS.sample_size, ARGS.cvc5_args,
+    );
 
-    for sample_size in &ARGS.sample_size {
-        for run_number in ARGS.run_start_no..=ARGS.no_runs {
-            let bname = &out_dir.join(format!("s{}_{}", sample_size, run_number));
-
-            println!(
-                "[{}] Sample Size: {} \tArgs: {} \trun: {}/{}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                sample_size,
-                ARGS.cvc5_args,
-                run_number,
-                ARGS.no_runs
-            );
-
-            // Call to run_benchmark function
-            benchmark::run_benchmark(sample_size, &bname)?;
-        }
-    }
+    // Call to run_benchmark function
+    benchmark::run_benchmark(sample_size, &bname)?;
 
     gcov::cleanup()?;
 
     warn!("This is a warning message.");
     error!("This is an error message.");
 
+    let start = Instant::now();
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());
 

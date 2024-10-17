@@ -15,28 +15,16 @@ pub struct CliArgs {
     pub cvc5_args: String,
 
     /// Sample size ("all", or comma-separated values)
-    #[arg(short = 'n', long, default_value = "all", value_delimiter = ',')]
-    pub sample_size: Vec<String>,
+    #[arg(short = 'n', long, default_value = "all")]
+    pub sample_size: String,
 
     /// Use individual GCOV prefixes for each run
     #[arg(short, long, action = clap::ArgAction::SetTrue)]
-    pub individual: bool,
-
-    /// Number of runs
-    #[arg(short = 'r', long, default_value_t = 1)]
-    pub no_runs: usize,
-
-    /// Start index for runs
-    #[arg(short = 's', long, default_value_t = 1)]
-    pub run_start_no: usize,
+    pub individual_prefixes: bool,
 
     /// Number of parallel jobs
     #[arg(short = 'j', long, default_value_t = 1)]
     pub job_size: usize,
-
-    /// Generate lcov as well as fastcov report
-    #[arg(short = 'f', long, action = clap::ArgAction::SetTrue)]
-    pub full_report: bool,
 
     /// Verbose output
     #[arg(short = 'v', long, action = clap::ArgAction::SetTrue)]
@@ -49,8 +37,8 @@ pub struct CliArgs {
     /// Benchmark directory
     pub benchmark_dir: PathBuf,
 
-    /// Output directory
-    pub output_dir: PathBuf,
+    /// Database which will contain the benchmark results
+    pub result_db: PathBuf,
 }
 
 // Global static variable to store parsed CLI arguments

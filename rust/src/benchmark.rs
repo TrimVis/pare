@@ -24,7 +24,7 @@ pub fn process_file(
     };
     let cmd = Path::join(&ARGS.build_dir, "bin/cvc5");
 
-    let output = if ARGS.individual {
+    let output = if ARGS.individual_prefixes {
         let file_path = PathBuf::from(file);
         let env = get_gcov_env(&file_path);
         Command::new(cmd)
