@@ -23,7 +23,7 @@ pub struct Source {
 pub struct Benchmark {
     pub id: u64,
     pub path: PathBuf,
-    pub prefix: String,
+    pub prefix: PathBuf,
 }
 
 pub struct BenchmarkRun {
@@ -82,10 +82,11 @@ impl<'a> Db<'a> {
             .insert_cvc5result
             .query_map(params![status as u8, limit], |row| {
                 let path: String = row.get(1)?;
+                let prefix: String = row.get(2)?;
                 Ok(Benchmark {
                     id: row.get(0)?,
                     path: PathBuf::from(path),
-                    prefix: row.get(2)?,
+                    prefix: PathBuf::from(prefix),
                 })
             })
             .expect("Issue during benchmark status update!");
@@ -350,7 +351,7 @@ fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
     Ok(())
 }
 
-// NOTE pjordan: This would require us to 
+// NOTE pjordan: This would require us to
 fn _populate_sources(conn: &Connection) -> ResultT<()> {
     let mut stmt = conn.prepare("INSERT INTO \"sources\" (path, prefix) VALUES (?1, ?2)")?;
 

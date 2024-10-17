@@ -6,6 +6,7 @@ use std::env;
 use std::fs;
 use std::io::{self};
 use std::os::unix::fs::symlink;
+                symlink(&gcno_file, &target_file)?;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::process::Output;
