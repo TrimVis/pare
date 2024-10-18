@@ -1,49 +1,25 @@
 use glob::glob;
-use rusqlite::OptionalExtension;
+// use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection, Statement};
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
+use crate::types::{Benchmark, BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
 
-pub enum Status {
-    Waiting,
-    Running,
-    WaitingProcessing,
-    Processing,
-    Done,
-}
-
-pub struct Source {
-    pub id: u64,
-    pub path: PathBuf,
-}
-
-pub struct Benchmark {
-    pub id: u64,
-    pub path: PathBuf,
-    pub prefix: PathBuf,
-}
-
-pub struct BenchmarkRun {
-    pub bench_id: u64,
-    pub time_ms: u64,
-    pub exit_code: i32,
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
-}
-
 pub struct Db<'a> {
-    conn: Connection,
+    conn: Rc<Connection>,
 
     stmts: Stmts<'a>,
 }
 
 impl<'a> Db<'a> {
     pub fn new() -> ResultT<Self> {
-        let conn = Connection::open(ARGS.result_db)?;
-        let stmts = Stmts::new(&conn)?;
+        let conn = Rc::new(Connection::open(&ARGS.result_db)?);
+        let stmts = Stmts::new(Rc::clone(&conn))?;
 
         Ok(Db { conn, stmts })
     }
@@ -57,29 +33,36 @@ impl<'a> Db<'a> {
         Ok(())
     }
 
-    pub fn update_benchmark_status(&self, bench_id: u64, status: Status) -> ResultT<()> {
+    pub fn update_benchmark_status(&mut self, bench_id: u64, status: Status) -> ResultT<()> {
         self.stmts
             .insert_cvc5result
+            .borrow_mut()
             .execute(params![bench_id, status as u8])
             .expect("Issue during benchmark status update!");
         Ok(())
     }
 
     pub fn retrieve_benchmarks_waiting_for_processing(
-        &self,
+        &mut self,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
         self.retrieve_bench_of_status(Status::WaitingProcessing, limit)
     }
 
-    pub fn retrieve_benchmarks_waiting_for_cvc5(&self, limit: usize) -> ResultT<Vec<Benchmark>> {
+    pub fn retrieve_benchmarks_waiting_for_cvc5(
+        &mut self,
+        limit: usize,
+    ) -> ResultT<Vec<Benchmark>> {
         self.retrieve_bench_of_status(Status::Waiting, limit)
     }
 
-    fn retrieve_bench_of_status(&self, status: Status, limit: usize) -> ResultT<Vec<Benchmark>> {
-        let rows = self
-            .stmts
-            .insert_cvc5result
+    fn retrieve_bench_of_status(
+        &mut self,
+        status: Status,
+        limit: usize,
+    ) -> ResultT<Vec<Benchmark>> {
+        let mut stmt = self.stmts.insert_cvc5result.borrow_mut();
+        let rows = stmt
             .query_map(params![status as u8, limit], |row| {
                 let path: String = row.get(1)?;
                 let prefix: String = row.get(2)?;
@@ -98,9 +81,10 @@ impl<'a> Db<'a> {
         Ok(res)
     }
 
-    pub fn add_cvc5_run_result(&self, run_result: BenchmarkRun) -> ResultT<()> {
+    pub fn add_cvc5_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
         self.stmts
             .insert_cvc5result
+            .borrow_mut()
             .execute(params![
                 run_result.bench_id,
                 run_result.time_ms,
@@ -119,14 +103,14 @@ impl<'a> Db<'a> {
 }
 
 struct Stmts<'a> {
-    insert_cvc5result: Statement<'a>,
-    update_benchstatus: Statement<'a>,
-    select_benchstatus: Statement<'a>,
+    insert_cvc5result: Rc<RefCell<Statement<'a>>>,
+    update_benchstatus: Rc<RefCell<Statement<'a>>>,
+    select_benchstatus: Rc<RefCell<Statement<'a>>>,
 }
 impl<'a> Stmts<'a> {
-    pub fn new(conn: &Connection) -> ResultT<Self> {
-        let insert_cvc5result = conn
-            .prepare(
+    pub fn new(conn: Rc<Connection>) -> ResultT<Self> {
+        let insert_cvc5result = Rc::new(RefCell::new(
+            conn.prepare(
                 "INSERT INTO \"result_benchmarks\" (
                 bench_id,
                 time_ms,
@@ -135,41 +119,40 @@ impl<'a> Stmts<'a> {
                 stderr,
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
             )
-            .expect("Issue during benchmark status update query preparation");
+            .expect("Issue during benchmark status update query preparation"),
+        ));
 
-        let update_benchstatus = conn
-            .prepare(
+        let update_benchstatus = Rc::from(RefCell::new(
+            conn.prepare(
                 "INSERT INTO \"status_benchmarks\" (bench_id, status) 
                 VALUES (?1, ?2) 
                 ON CONFLICT(bench_id) DO UPDATE SET status = ?2",
             )
-            .expect("Issue during cvc5 run result query preparation");
+            .expect("Issue during cvc5 run result query preparation"),
+        ));
 
-        let select_benchstatus = conn
-            .prepare(
+        let select_benchstatus = Rc::from(RefCell::new(
+            conn.prepare(
                 "SELECT s.bench_id, b.path, b.prefix
                 FROM \"status_benchmarks\" AS s
                 JOIN \"benchmarks\" AS b ON b.id = s.bench_id
                 WHERE s.status = ?1
                 LIMIT ?2",
             )
-            .expect("Issue during benchstatus select query preparation");
+            .expect("Issue during benchstatus select query preparation"),
+        ));
 
-        let update_function = conn
-            .prepare(
-                "SELECT s.bench_id, b.path, b.prefix
-                FROM \"status_benchmarks\" AS s
-                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
-                WHERE s.status = ?1
-                LIMIT ?2",
-            )
-            .expect("Issue during benchstatus select query preparation");
-
+        // FIXME: Dirty hack by ChatGPT. There is likely a better way
         Ok(Stmts {
-            insert_cvc5result,
-            update_benchstatus,
-            select_benchstatus,
+            insert_cvc5result: unsafe { std::mem::transmute(insert_cvc5result) },
+            update_benchstatus: unsafe { std::mem::transmute(update_benchstatus) },
+            select_benchstatus: unsafe { std::mem::transmute(select_benchstatus) },
         })
+        // Ok(Stmts {
+        //     insert_cvc5result,
+        //     update_benchstatus,
+        //     select_benchstatus,
+        // })
     }
 }
 
@@ -327,7 +310,7 @@ fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
     fs::create_dir_all(&prefix_base)
         .expect("Could not create temporary base folder for prefix files");
 
-    let bench_dir = ARGS.benchmark_dir;
+    let bench_dir = &ARGS.benchmark_dir;
     let bench_dir = bench_dir.canonicalize().unwrap().display().to_string();
     let pattern = format!("{}/**/*.smt2", bench_dir);
 
@@ -355,7 +338,7 @@ fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
 fn _populate_sources(conn: &Connection) -> ResultT<()> {
     let mut stmt = conn.prepare("INSERT INTO \"sources\" (path, prefix) VALUES (?1, ?2)")?;
 
-    let build_dir = ARGS.build_dir;
+    let build_dir = &ARGS.build_dir;
     let build_dir = build_dir.canonicalize().unwrap().display().to_string();
     let pattern = format!("{}/**/*.gcno", build_dir);
 
@@ -365,7 +348,7 @@ fn _populate_sources(conn: &Connection) -> ResultT<()> {
             // It would be best if I could also strip the CMakeFiles/cvc5-obj.dir
             // But first I will have to check it for consistency
             let file = file
-                .strip_prefix(build_dir)
+                .strip_prefix(&build_dir)
                 .expect("Error while stripping common prefix from gcno file");
             let src_file = file.to_str().unwrap();
             let src_file = &src_file[..src_file.len() - 5];

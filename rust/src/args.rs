@@ -2,6 +2,9 @@ use clap::Parser;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
 
+// Global static variable to store parsed CLI arguments
+pub static ARGS: Lazy<CliArgs> = Lazy::new(|| CliArgs::parse());
+
 /// Benchmark coverage script.
 #[derive(Parser, Debug)]
 #[command(name = "Benchmark coverage script")]
@@ -40,6 +43,3 @@ pub struct CliArgs {
     /// Database which will contain the benchmark results
     pub result_db: PathBuf,
 }
-
-// Global static variable to store parsed CLI arguments
-pub static ARGS: Lazy<CliArgs> = Lazy::new(|| CliArgs::parse());

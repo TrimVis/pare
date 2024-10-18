@@ -1,23 +1,25 @@
 mod args;
-mod benchmark;
 mod db;
-mod fastcov;
-mod gcov;
-mod utils;
-
-mod gcov_worker;
+mod types;
+mod worker;
 
 use crate::args::ARGS;
-use std::time::Instant;
+use crate::types::ResultT;
 
 use fern::Dispatch;
 use log::{error, info, warn};
 use std::fs::{create_dir_all, File};
-
-type ResultT<T> = Result<T, Box<dyn std::error::Error>>;
+use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Setup logger
+    let start = Instant::now();
+
+    info!(
+        "Sample Size: {} \tArgs: {}",
+        ARGS.sample_size, ARGS.cvc5_args,
+    );
+
+    // Logger Setup
     Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -31,30 +33,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .chain(File::create(&ARGS.log_file)?) // log to file
         .apply()?;
 
+    // Db Setup
     assert!(!ARGS.result_db.exists(), "DB file already exists.");
-
-    let start = Instant::now();
-
-    // Ensure directory in which result db will live exists
     let out_dir = ARGS.result_db.parent().unwrap().canonicalize().unwrap();
     create_dir_all(out_dir).unwrap();
+    let db = db::Db::new()?;
+    db.init()?;
 
-    gcov::init()?;
+    // Runner Setup
+    let runner = worker::Runner::new();
 
-    info!(
-        "Sample Size: {} \tArgs: {}",
-        ARGS.sample_size, ARGS.cvc5_args,
-    );
 
-    // Call to run_benchmark function
-    benchmark::run_benchmark(sample_size, &bname)?;
-
-    gcov::cleanup()?;
+    // FIXME: Actually do things
 
     warn!("This is a warning message.");
     error!("This is an error message.");
 
-    let start = Instant::now();
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());
 

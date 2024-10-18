@@ -7,10 +7,11 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-use log::{error, info, warn};
+use log::{error, info};
 use std::path::{Path, PathBuf};
 
-use crate::db::{Benchmark, BenchmarkRun, Db, Status as BenchStatus};
+use crate::db::Db;
+use crate::types::{Benchmark, BenchmarkRun, Status as BenchStatus};
 use crate::ARGS;
 
 type BenchmarkFile = PathBuf;
@@ -29,7 +30,9 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(no_workers: usize) -> Self {
+    pub fn new() -> Self {
+        let no_workers = ARGS.job_size;
+
         assert!(no_workers > 0);
 
         let (wsender, wreceiver) = mpsc::channel();
@@ -46,13 +49,15 @@ impl Runner {
         }
     }
 
-    pub fn enqueue_gcov(&self, db: &Db, benchmark: Benchmark) {
-        db.update_benchmark_status(benchmark.id, BenchStatus::Processing);
+    pub fn enqueue_gcov(&self, db: &mut Db, benchmark: Benchmark) {
+        db.update_benchmark_status(benchmark.id, BenchStatus::Processing)
+            .expect("Could not update benchmark status");
         self._wqueue.send(QueueMessage::Cvc5Cmd(benchmark)).unwrap();
     }
 
-    pub fn enqueue_cvc5(&self, db: &Db, benchmark: Benchmark) {
-        db.update_benchmark_status(benchmark.id, BenchStatus::Running);
+    pub fn enqueue_cvc5(&self, db: &mut Db, benchmark: Benchmark) {
+        db.update_benchmark_status(benchmark.id, BenchStatus::Running)
+            .expect("Could not update benchmark status");
         self._wqueue.send(QueueMessage::Cvc5Cmd(benchmark)).unwrap();
     }
 
@@ -74,10 +79,11 @@ struct Worker {
 }
 
 impl Worker {
-    fn process_cvc5(db: &Db, cvc5cmd: &Path, benchmark: &Benchmark) -> () {
-        let mut cmd = &mut Command::new(cvc5cmd)
+    fn process_cvc5(db: &mut Db, cvc5cmd: &Path, benchmark: &Benchmark) -> () {
+        let cmd = &mut Command::new(cvc5cmd);
+        let cmd = cmd
             .env("GCOV_PREFIX", benchmark.prefix.display().to_string())
-            .args(&[ARGS.cvc5_args, benchmark.path.display().to_string()]);
+            .args(&[&ARGS.cvc5_args, &benchmark.path.display().to_string()]);
 
         let start = Instant::now();
         let output = cmd.output().expect("Could not capture output of cvc5...");
@@ -103,7 +109,7 @@ impl Worker {
         db.update_benchmark_status(benchmark.id, BenchStatus::WaitingProcessing);
     }
 
-    fn process_gcov(db: &Db, benchmark: &Benchmark) -> () {
+    fn process_gcov(db: &mut Db, benchmark: &Benchmark) -> () {
         // let mut stmt = conn.prepare("INSERT INTO \"sources\" (path, prefix) VALUES (?1, ?2)")?;
 
         // let build_dir = ARGS.build_dir;
@@ -136,12 +142,11 @@ impl Worker {
                 let gcno_file_src = gcno_file.strip_prefix(&prefix_dir);
                 symlink(&gcno_file, &gcno_file).expect("Error while trying to create symlink");
 
-                let mut cmd = &mut Command::new("gcov").args(&[
-                    "--json",
-                    "--stdout",
-                    gcda_file.to_str().unwrap(),
-                ]);
-                let output = cmd.output().expect("Could not capture output of gcov...");
+                let args = ["--json", "--stdout", gcda_file.to_str().unwrap()];
+                let output = Command::new("gcov")
+                    .args(&args)
+                    .output()
+                    .expect("Could not capture output of gcov...");
                 if !output.status.success() {
                     error!(
                         "Gcov failed with error!\n GCDA File: {:?} \n ERROR: {:?}",
@@ -160,25 +165,25 @@ impl Worker {
     }
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<QueueMessage>>>) -> Worker {
         let thread = thread::spawn(move || loop {
-            let db = Db::new().expect("Could not connect to the DB in worker");
+            let mut db = Db::new().expect("Could not connect to the DB in worker");
             let cvc5cmd = Path::join(&ARGS.build_dir, "bin/cvc5");
 
             let job = receiver.lock().unwrap().recv();
             match job {
                 Ok(QueueMessage::Cvc5Cmd(benchmark)) => {
-                    println!("Worker {} got a job; executing.", id);
-                    Worker::process_cvc5(&db, &cvc5cmd, &benchmark)
+                    info!("Worker {} got a job; executing.", id);
+                    Worker::process_cvc5(&mut db, &cvc5cmd, &benchmark)
                 }
                 Ok(QueueMessage::GcovCmd(benchmark)) => {
-                    println!("Worker {} got a job; executing.", id);
-                    Worker::process_gcov(&db, &benchmark)
+                    info!("Worker {} got a job; executing.", id);
+                    Worker::process_gcov(&mut db, &benchmark)
                 }
                 Ok(QueueMessage::Stop) => {
-                    println!("Worker {} received stop signal; shutting down.", id);
+                    info!("Worker {} received stop signal; shutting down.", id);
                     break;
                 }
                 Err(_) => {
-                    println!("Worker {} disconnected; shutting down.", id);
+                    error!("Worker {} disconnected; shutting down.", id);
                     break;
                 }
             }
