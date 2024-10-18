@@ -1,5 +1,6 @@
 use glob::glob;
 // use rusqlite::OptionalExtension;
+use log::{error, info, warn};
 use rusqlite::{params, Connection, Statement};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -19,23 +20,29 @@ pub struct Db<'a> {
 impl<'a> Db<'a> {
     pub fn new() -> ResultT<Self> {
         let conn = Rc::new(Connection::open(&ARGS.result_db)?);
+        info!("Creating tables...");
+        create_tables(&conn).expect("Issue during table creation");
         let stmts = Stmts::new(Rc::clone(&conn))?;
 
         Ok(Db { conn, stmts })
     }
 
     pub fn init(&self) -> ResultT<()> {
+        info!("Configuring database...");
         prepare(&self.conn).expect("Issue during table preparation");
-        create_tables(&self.conn).expect("Issue during table creation");
+        info!("Populating config table...");
         populate_config(&self.conn).expect("Issue during config table population");
+        info!("Populating benchmarks table...");
         populate_benchmarks(&self.conn).expect("Issue during benchmark table population");
+        info!("Populating status table...");
+        populate_status(&self.conn).expect("Issue during status population");
 
         Ok(())
     }
 
     pub fn update_benchmark_status(&mut self, bench_id: u64, status: Status) -> ResultT<()> {
         self.stmts
-            .insert_cvc5result
+            .update_benchstatus
             .borrow_mut()
             .execute(params![bench_id, status as u8])
             .expect("Issue during benchmark status update!");
@@ -61,7 +68,7 @@ impl<'a> Db<'a> {
         status: Status,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
-        let mut stmt = self.stmts.insert_cvc5result.borrow_mut();
+        let mut stmt = self.stmts.select_benchstatus.borrow_mut();
         let rows = stmt
             .query_map(params![status as u8, limit], |row| {
                 let path: String = row.get(1)?;
@@ -79,6 +86,15 @@ impl<'a> Db<'a> {
             res.push(row.unwrap());
         }
         Ok(res)
+    }
+
+    pub fn remaining_count(&mut self) -> ResultT<usize> {
+        let mut stmt = self.stmts.count_benchstatus.borrow_mut();
+        let mut res = stmt.query(params![Status::Waiting as u8])?;
+        let row = res.next()?.unwrap();
+        let row_count: usize = row.get(0)?;
+
+        Ok(row_count)
     }
 
     pub fn add_cvc5_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
@@ -106,6 +122,7 @@ struct Stmts<'a> {
     insert_cvc5result: Rc<RefCell<Statement<'a>>>,
     update_benchstatus: Rc<RefCell<Statement<'a>>>,
     select_benchstatus: Rc<RefCell<Statement<'a>>>,
+    count_benchstatus: Rc<RefCell<Statement<'a>>>,
 }
 impl<'a> Stmts<'a> {
     pub fn new(conn: Rc<Connection>) -> ResultT<Self> {
@@ -116,7 +133,7 @@ impl<'a> Stmts<'a> {
                 time_ms,
                 exit_code,
                 stdout,
-                stderr,
+                stderr
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .expect("Issue during benchmark status update query preparation"),
@@ -142,11 +159,22 @@ impl<'a> Stmts<'a> {
             .expect("Issue during benchstatus select query preparation"),
         ));
 
+        let count_benchstatus = Rc::from(RefCell::new(
+            conn.prepare(
+                "SELECT COUNT(1)
+                FROM \"status_benchmarks\" AS s
+                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
+                WHERE s.status = ?1",
+            )
+            .expect("Issue during benchstatus count query preparation"),
+        ));
+
         // FIXME: Dirty hack by ChatGPT. There is likely a better way
         Ok(Stmts {
             insert_cvc5result: unsafe { std::mem::transmute(insert_cvc5result) },
             update_benchstatus: unsafe { std::mem::transmute(update_benchstatus) },
             select_benchstatus: unsafe { std::mem::transmute(select_benchstatus) },
+            count_benchstatus: unsafe { std::mem::transmute(count_benchstatus) },
         })
         // Ok(Stmts {
         //     insert_cvc5result,
@@ -157,7 +185,17 @@ impl<'a> Stmts<'a> {
 }
 
 fn prepare(conn: &Connection) -> ResultT<()> {
+    // Disable disk sync after every transaction
+    conn.execute("PRAGMA synchronous = OFF", [])?;
+    // Increase cache size to 1GB
+    conn.execute("PRAGMA cache_size = -1000000", [])?;
+    // Store temporary tables in memory
+    conn.execute("PRAGMA temp_store = MEMORY", [])?;
+    // Enable support for foreign keys
     conn.execute("PRAGMA foreign_keys = ON", [])?;
+    // Enable write-ahead-log for increased write performance
+    conn.query_row("PRAGMA journal_mode = WAL", [], |_row| Ok(()))?;
+
     Ok(())
 }
 
@@ -165,7 +203,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
     // Stores the arguments and other run parameters
     let config_table = "CREATE TABLE IF NOT EXISTS \"config\" (
                 key TEXT NOT NULL PRIMARY KEY,
-                value TEXT NOT NULL,
+                value TEXT NOT NULL
             )";
     conn.execute(&config_table, [])
         .expect("Issue during config table creation");
@@ -173,7 +211,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
     // Stores the processing status for all benchmarks
     let status_table = "CREATE TABLE IF NOT EXISTS \"status_benchmarks\" (
                 bench_id INTEGER NOT NULL PRIMARY KEY,
-                status TEXT,
+                status TEXT
             )";
     conn.execute(&status_table, [])
         .expect("Issue during benchmark status table creation");
@@ -182,7 +220,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
     let benchmarks_table = "CREATE TABLE IF NOT EXISTS \"benchmarks\" (
                 id INTEGER PRIMARY KEY,
                 prefix TEXT,
-                full_path TEXT NOT NULL,
+                path TEXT NOT NULL
             )";
     conn.execute(&benchmarks_table, [])
         .expect("Issue during benchmarks table creation");
@@ -190,7 +228,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
     // Store information about source files
     let source_table = "CREATE TABLE IF NOT EXISTS \"sources\" (
                 id INTEGER PRIMARY KEY,
-                path INTEGER NOT NULL,
+                path INTEGER NOT NULL
             )";
     conn.execute(&source_table, [])
         .expect("Issue during sources table creation");
@@ -200,7 +238,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
-                UNIQUE(source_id, name)
+                UNIQUE(source_id, name),
                 FOREIGN KEY (source_id) REFERENCES sources(id)
             )";
     conn.execute(&func_table, [])
@@ -211,7 +249,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 branch_no INTEGER NOT NULL,
-                UNIQUE(source_id, branch_no)
+                UNIQUE(source_id, branch_no),
                 FOREIGN KEY (source_id) REFERENCES sources(id)
             )";
     conn.execute(&branch_table, [])
@@ -222,7 +260,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 line_no INTEGER NOT NULL,
-                UNIQUE(source_id, name)
+                UNIQUE(source_id, line_no),
                 FOREIGN KEY (source_id) REFERENCES sources(id)
             )";
     conn.execute(&line_table, [])
@@ -247,7 +285,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
                 bench_id INTEGER NOT NULL,
                 func_id INTEGER NOT NULL,
                 usage TEXT NOT NULL,
-                UNIQUE(bench_id, func_id)
+                UNIQUE(bench_id, func_id),
                 FOREIGN KEY (func_id) REFERENCES functions(id),
                 FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
             )";
@@ -260,7 +298,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
                 bench_id INTEGER NOT NULL,
                 line_id INTEGER NOT NULL,
                 usage TEXT NOT NULL,
-                UNIQUE(bench_id, line_id)
+                UNIQUE(bench_id, line_id),
                 FOREIGN KEY (line_id) REFERENCES lines(id),
                 FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
             )";
@@ -273,7 +311,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
                 bench_id INTEGER NOT NULL,
                 branch_id INTEGER NOT NULL,
                 usage TEXT NOT NULL,
-                UNIQUE(bench_id, branch_id)
+                UNIQUE(bench_id, branch_id),
                 FOREIGN KEY (branch_id) REFERENCES branches(id),
                 FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
             )";
@@ -304,6 +342,7 @@ fn populate_config(conn: &Connection) -> ResultT<()> {
 }
 
 fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
+    // FIXME: Readd sampling support
     let mut stmt = conn.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
     let prefix_base = Path::new("/tmp/asdf");
@@ -321,14 +360,36 @@ fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
             let hash = format!("{:x}", hasher.finalize());
 
             let prefix = prefix_base.join(hash);
-            fs::create_dir(&prefix)?;
-
-            // FIXME: Symlink (Probably best in goc_wokrer)
+            if !prefix.exists() {
+                fs::create_dir(&prefix).expect("Could not create prefix dir");
+            }
 
             let file = file.canonicalize().unwrap().display().to_string();
             let prefix = prefix.canonicalize().unwrap().display().to_string();
+
+            // FIXME: Instead of storing the full path only store the difference
+            // due to file size reasons
+            
             stmt.execute(params![file, prefix])?;
         }
+    }
+
+    Ok(())
+}
+
+fn populate_status(conn: &Connection) -> ResultT<()> {
+    // FIXME: Readd sampling support
+    let mut select_stmt = conn.prepare("SELECT id FROM \"benchmarks\"")?;
+    let bench_rows = select_stmt.query_map([], |row| {
+        let id: u64 = row.get(0)?;
+        Ok(id)
+    })?;
+
+    let mut stmt =
+        conn.prepare("INSERT INTO \"status_benchmarks\" (bench_id, status) VALUES (?1, ?2)")?;
+    for row in bench_rows {
+        let bench_id = row.unwrap();
+        stmt.execute(params![bench_id, Status::Waiting as u64])?;
     }
 
     Ok(())

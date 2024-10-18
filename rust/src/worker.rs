@@ -105,8 +105,10 @@ impl Worker {
                 .expect("Duration too long for 64 bits"),
             stdout: Some(String::from_utf8(output.stdout).expect("Error decoding cvc5 stdout")),
             stderr: Some(String::from_utf8(output.stderr).expect("Error decoding cvc5 stderr")),
-        });
-        db.update_benchmark_status(benchmark.id, BenchStatus::WaitingProcessing);
+        })
+        .unwrap();
+        db.update_benchmark_status(benchmark.id, BenchStatus::WaitingProcessing)
+            .unwrap();
     }
 
     fn process_gcov(db: &mut Db, benchmark: &Benchmark) -> () {
@@ -161,7 +163,8 @@ impl Worker {
             }
         }
 
-        db.update_benchmark_status(benchmark.id, BenchStatus::Done);
+        db.update_benchmark_status(benchmark.id, BenchStatus::Done)
+            .unwrap();
     }
     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<QueueMessage>>>) -> Worker {
         let thread = thread::spawn(move || loop {
