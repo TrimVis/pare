@@ -1,190 +1,13 @@
-use glob::glob;
-// use rusqlite::OptionalExtension;
-use log::{error, info, warn};
-use rusqlite::{params, Connection, Statement};
-use sha2::{Digest, Sha256};
-use std::cell::RefCell;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-
-use crate::types::{Benchmark, BenchmarkRun, Status};
+use crate::types::Status;
 use crate::{ResultT, ARGS};
 
-pub struct Db<'a> {
-    conn: Rc<Connection>,
+use glob::glob;
+use rusqlite::{params, Connection};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::Path;
 
-    stmts: Stmts<'a>,
-}
-
-impl<'a> Db<'a> {
-    pub fn new() -> ResultT<Self> {
-        let conn = Rc::new(Connection::open(&ARGS.result_db)?);
-        info!("Creating tables...");
-        create_tables(&conn).expect("Issue during table creation");
-        let stmts = Stmts::new(Rc::clone(&conn))?;
-
-        Ok(Db { conn, stmts })
-    }
-
-    pub fn init(&self) -> ResultT<()> {
-        info!("Configuring database...");
-        prepare(&self.conn).expect("Issue during table preparation");
-        info!("Populating config table...");
-        populate_config(&self.conn).expect("Issue during config table population");
-        info!("Populating benchmarks table...");
-        populate_benchmarks(&self.conn).expect("Issue during benchmark table population");
-        info!("Populating status table...");
-        populate_status(&self.conn).expect("Issue during status population");
-
-        Ok(())
-    }
-
-    pub fn update_benchmark_status(&mut self, bench_id: u64, status: Status) -> ResultT<()> {
-        self.stmts
-            .update_benchstatus
-            .borrow_mut()
-            .execute(params![bench_id, status as u8])
-            .expect("Issue during benchmark status update!");
-        Ok(())
-    }
-
-    pub fn retrieve_benchmarks_waiting_for_processing(
-        &mut self,
-        limit: usize,
-    ) -> ResultT<Vec<Benchmark>> {
-        self.retrieve_bench_of_status(Status::WaitingProcessing, limit)
-    }
-
-    pub fn retrieve_benchmarks_waiting_for_cvc5(
-        &mut self,
-        limit: usize,
-    ) -> ResultT<Vec<Benchmark>> {
-        self.retrieve_bench_of_status(Status::Waiting, limit)
-    }
-
-    fn retrieve_bench_of_status(
-        &mut self,
-        status: Status,
-        limit: usize,
-    ) -> ResultT<Vec<Benchmark>> {
-        let mut stmt = self.stmts.select_benchstatus.borrow_mut();
-        let rows = stmt
-            .query_map(params![status as u8, limit], |row| {
-                let path: String = row.get(1)?;
-                let prefix: String = row.get(2)?;
-                Ok(Benchmark {
-                    id: row.get(0)?,
-                    path: PathBuf::from(path),
-                    prefix: PathBuf::from(prefix),
-                })
-            })
-            .expect("Issue during benchmark status update!");
-
-        let mut res = Vec::with_capacity(limit);
-        for row in rows {
-            res.push(row.unwrap());
-        }
-        Ok(res)
-    }
-
-    pub fn remaining_count(&mut self) -> ResultT<usize> {
-        let mut stmt = self.stmts.count_benchstatus.borrow_mut();
-        let mut res = stmt.query(params![Status::Waiting as u8])?;
-        let row = res.next()?.unwrap();
-        let row_count: usize = row.get(0)?;
-
-        Ok(row_count)
-    }
-
-    pub fn add_cvc5_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
-        self.stmts
-            .insert_cvc5result
-            .borrow_mut()
-            .execute(params![
-                run_result.bench_id,
-                run_result.time_ms,
-                run_result.exit_code,
-                run_result.stdout,
-                run_result.stderr,
-            ])
-            .expect("Issue during cvc5 run result insertion!");
-        Ok(())
-    }
-
-    // TODO IMplement me
-    pub fn add_gcov_measurement(&self) -> ResultT<()> {
-        Ok(())
-    }
-}
-
-struct Stmts<'a> {
-    insert_cvc5result: Rc<RefCell<Statement<'a>>>,
-    update_benchstatus: Rc<RefCell<Statement<'a>>>,
-    select_benchstatus: Rc<RefCell<Statement<'a>>>,
-    count_benchstatus: Rc<RefCell<Statement<'a>>>,
-}
-impl<'a> Stmts<'a> {
-    pub fn new(conn: Rc<Connection>) -> ResultT<Self> {
-        let insert_cvc5result = Rc::new(RefCell::new(
-            conn.prepare(
-                "INSERT INTO \"result_benchmarks\" (
-                bench_id,
-                time_ms,
-                exit_code,
-                stdout,
-                stderr
-            ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            )
-            .expect("Issue during benchmark status update query preparation"),
-        ));
-
-        let update_benchstatus = Rc::from(RefCell::new(
-            conn.prepare(
-                "INSERT INTO \"status_benchmarks\" (bench_id, status) 
-                VALUES (?1, ?2) 
-                ON CONFLICT(bench_id) DO UPDATE SET status = ?2",
-            )
-            .expect("Issue during cvc5 run result query preparation"),
-        ));
-
-        let select_benchstatus = Rc::from(RefCell::new(
-            conn.prepare(
-                "SELECT s.bench_id, b.path, b.prefix
-                FROM \"status_benchmarks\" AS s
-                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
-                WHERE s.status = ?1
-                LIMIT ?2",
-            )
-            .expect("Issue during benchstatus select query preparation"),
-        ));
-
-        let count_benchstatus = Rc::from(RefCell::new(
-            conn.prepare(
-                "SELECT COUNT(1)
-                FROM \"status_benchmarks\" AS s
-                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
-                WHERE s.status = ?1",
-            )
-            .expect("Issue during benchstatus count query preparation"),
-        ));
-
-        // FIXME: Dirty hack by ChatGPT. There is likely a better way
-        Ok(Stmts {
-            insert_cvc5result: unsafe { std::mem::transmute(insert_cvc5result) },
-            update_benchstatus: unsafe { std::mem::transmute(update_benchstatus) },
-            select_benchstatus: unsafe { std::mem::transmute(select_benchstatus) },
-            count_benchstatus: unsafe { std::mem::transmute(count_benchstatus) },
-        })
-        // Ok(Stmts {
-        //     insert_cvc5result,
-        //     update_benchstatus,
-        //     select_benchstatus,
-        // })
-    }
-}
-
-fn prepare(conn: &Connection) -> ResultT<()> {
+pub(super) fn prepare(conn: &Connection) -> ResultT<()> {
     // Disable disk sync after every transaction
     conn.execute("PRAGMA synchronous = OFF", [])?;
     // Increase cache size to 1GB
@@ -199,7 +22,7 @@ fn prepare(conn: &Connection) -> ResultT<()> {
     Ok(())
 }
 
-fn create_tables(conn: &Connection) -> ResultT<()> {
+pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
     // Stores the arguments and other run parameters
     let config_table = "CREATE TABLE IF NOT EXISTS \"config\" (
                 key TEXT NOT NULL PRIMARY KEY,
@@ -321,7 +144,7 @@ fn create_tables(conn: &Connection) -> ResultT<()> {
     Ok(())
 }
 
-fn populate_config(conn: &Connection) -> ResultT<()> {
+pub(super) fn populate_config(conn: &Connection) -> ResultT<()> {
     let c_insert = "INSERT INTO \"config\" (key, value) VALUES (?1, ?2)";
     conn.execute(
         &c_insert,
@@ -341,7 +164,7 @@ fn populate_config(conn: &Connection) -> ResultT<()> {
     Ok(())
 }
 
-fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
+pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
     // FIXME: Readd sampling support
     let mut stmt = conn.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
@@ -369,7 +192,7 @@ fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
 
             // FIXME: Instead of storing the full path only store the difference
             // due to file size reasons
-            
+
             stmt.execute(params![file, prefix])?;
         }
     }
@@ -377,7 +200,7 @@ fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
     Ok(())
 }
 
-fn populate_status(conn: &Connection) -> ResultT<()> {
+pub(super) fn populate_status(conn: &Connection) -> ResultT<()> {
     // FIXME: Readd sampling support
     let mut select_stmt = conn.prepare("SELECT id FROM \"benchmarks\"")?;
     let bench_rows = select_stmt.query_map([], |row| {
@@ -396,7 +219,7 @@ fn populate_status(conn: &Connection) -> ResultT<()> {
 }
 
 // NOTE pjordan: This would require us to
-fn _populate_sources(conn: &Connection) -> ResultT<()> {
+pub(super) fn _populate_sources(conn: &Connection) -> ResultT<()> {
     let mut stmt = conn.prepare("INSERT INTO \"sources\" (path, prefix) VALUES (?1, ?2)")?;
 
     let build_dir = &ARGS.build_dir;

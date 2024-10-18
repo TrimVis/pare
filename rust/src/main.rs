@@ -1,8 +1,7 @@
 mod args;
 mod db;
+mod runner;
 mod types;
-mod worker;
-
 use crate::args::ARGS;
 use crate::types::ResultT;
 
@@ -51,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     error!("This is an error message.");
 
     // Runner Setup
-    let runner = worker::Runner::new();
+    let mut runner = runner::Runner::new();
 
     let mut remaining_entries = db.remaining_count()?;
     while remaining_entries > 0 {
@@ -69,8 +68,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         remaining_entries = db.remaining_count()?;
     }
 
-    // FIXME: Actually do things
+    // Wait for all jobs to finish
+    runner.join();
 
+    // FIXME: Actually do things
 
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());
