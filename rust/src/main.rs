@@ -7,18 +7,24 @@ use crate::types::ResultT;
 
 use fern::Dispatch;
 use log::{error, info, warn};
-use std::fs::{create_dir_all, File};
+use std::fs::File;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
+    let running = Arc::new(AtomicBool::new(true));
 
-    info!(
-        "Sample Size: {} \tArgs: {}",
-        ARGS.sample_size, ARGS.cvc5_args,
-    );
+    // SIGINT setup
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        warn!("Received Ctrl+C! Exiting gracefully...");
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl+C handler");
 
     // Logger Setup
     Dispatch::new()
@@ -43,7 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut db = db::Db::new()?;
     db.init()?;
 
-    // return Ok(());
+    info!(
+        "Sample Size: {} \tArgs: {}",
+        ARGS.sample_size, ARGS.cvc5_args,
+    );
 
     info!("This is a info message.");
     warn!("This is a warning message.");
@@ -54,6 +63,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut remaining_entries = db.remaining_count()?;
     while remaining_entries > 0 {
+        // Early return in case of Ctrl+C
+        if !running.load(Ordering::SeqCst) {
+            runner.stop();
+            break;
+        }
+
         let gcov_runs = db.retrieve_benchmarks_waiting_for_processing(ARGS.job_size * 2)?;
         for r in gcov_runs {
             runner.enqueue_gcov(&mut db, r);

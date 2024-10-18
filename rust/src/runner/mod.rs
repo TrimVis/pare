@@ -41,7 +41,7 @@ impl Runner {
     pub fn enqueue_gcov(&self, db: &mut Db, benchmark: Benchmark) {
         db.update_benchmark_status(benchmark.id, BenchStatus::Processing)
             .expect("Could not update benchmark status");
-        self._wqueue.send(QueueMessage::Cvc5Cmd(benchmark)).unwrap();
+        self._wqueue.send(QueueMessage::GcovCmd(benchmark)).unwrap();
     }
 
     pub fn enqueue_cvc5(&self, db: &mut Db, benchmark: Benchmark) {
@@ -50,7 +50,7 @@ impl Runner {
         self._wqueue.send(QueueMessage::Cvc5Cmd(benchmark)).unwrap();
     }
 
-    pub fn _stop(&mut self) {
+    pub fn stop(&mut self) {
         self._wqueue.send(QueueMessage::Stop).unwrap();
     }
 
