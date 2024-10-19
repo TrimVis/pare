@@ -1,5 +1,4 @@
-use crate::db::Db;
-use crate::types::{Benchmark, BenchmarkRun, Status as BenchStatus};
+use crate::types::{Benchmark, BenchmarkRun};
 use crate::ARGS;
 
 use log::error;
@@ -7,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-pub(super) fn process(db: &mut Db, cvc5cmd: &Path, benchmark: &Benchmark) -> () {
+pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<BenchmarkRun> {
     let cmd = &mut Command::new(cvc5cmd);
     let cmd = cmd
         .env("GCOV_PREFIX", benchmark.prefix.display().to_string())
@@ -24,7 +23,7 @@ pub(super) fn process(db: &mut Db, cvc5cmd: &Path, benchmark: &Benchmark) -> () 
         );
     }
 
-    db.add_cvc5_run_result(BenchmarkRun {
+    return Some(BenchmarkRun {
         bench_id: benchmark.id,
         exit_code: output.status.code().unwrap(),
         time_ms: duration
@@ -33,8 +32,5 @@ pub(super) fn process(db: &mut Db, cvc5cmd: &Path, benchmark: &Benchmark) -> () 
             .expect("Duration too long for 64 bits"),
         stdout: Some(String::from_utf8(output.stdout).expect("Error decoding cvc5 stdout")),
         stderr: Some(String::from_utf8(output.stderr).expect("Error decoding cvc5 stderr")),
-    })
-    .unwrap();
-    db.update_benchmark_status(benchmark.id, BenchStatus::WaitingProcessing)
-        .unwrap();
+    });
 }

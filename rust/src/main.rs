@@ -71,12 +71,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let gcov_runs = db.retrieve_benchmarks_waiting_for_processing(ARGS.job_size * 2)?;
         for r in gcov_runs {
-            runner.enqueue_gcov(&mut db, r);
+            runner.enqueue_gcov(r);
         }
 
         let cvc5_runs = db.retrieve_benchmarks_waiting_for_cvc5(ARGS.job_size * 2)?;
         for r in cvc5_runs {
-            runner.enqueue_cvc5(&mut db, r);
+            runner.enqueue_cvc5(r);
         }
 
         thread::sleep(Duration::from_secs(5));
@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for all jobs to finish
     runner.join();
 
-    // FIXME: Actually do things
+    // TODO: Actually do things
 
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());

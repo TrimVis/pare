@@ -1,21 +1,37 @@
 mod cvc5;
 mod gcov;
 mod worker;
-use crate::db::Db;
-use crate::types::{Benchmark, Status as BenchStatus};
+use gcov::InterpretedGcov;
+
+use crate::types::{Benchmark, BenchmarkRun};
 use crate::ARGS;
 
+use std::collections::HashSet;
 use std::sync::{mpsc, Arc, Mutex};
 
-enum QueueMessage {
-    GcovCmd(Benchmark),
+enum RunnerQueueMessage {
     Cvc5Cmd(Benchmark),
+    GcovCmd(Benchmark),
+    Stop,
+}
+
+enum ProcessingQueueMessage {
+    Cvc5Start(u64),
+    GcovStart(u64),
+    Cvc5Res(Benchmark, BenchmarkRun),
+    GcovRes(Benchmark, Vec<InterpretedGcov>),
     Stop,
 }
 
 pub struct Runner {
-    _workers: Vec<worker::Worker>,
-    _wqueue: mpsc::Sender<QueueMessage>,
+    runner_workers: Vec<worker::Worker>,
+    runner_queue: mpsc::Sender<RunnerQueueMessage>,
+
+    processing_worker: worker::Worker,
+    processing_queue: Arc<Mutex<mpsc::Sender<ProcessingQueueMessage>>>,
+
+    cvc5_enqueued: Box<HashSet<u64>>,
+    gcov_enqueued: Box<HashSet<u64>>,
 }
 
 impl Runner {
@@ -24,39 +40,76 @@ impl Runner {
 
         assert!(no_workers > 0);
 
-        let (wsender, wreceiver) = mpsc::channel();
-        let wreceiver = Arc::new(Mutex::new(wreceiver));
+        let (p_sender, p_receiver) = mpsc::channel();
+        let processing_queue = Arc::new(Mutex::new(p_sender));
+        let processing_worker = worker::Worker::new_processing(p_receiver);
 
-        let mut workers = Vec::with_capacity(no_workers);
+        let (r_sender, r_receiver) = mpsc::channel();
+        let runner_receiver = Arc::new(Mutex::new(r_receiver));
+        let runner_queue = r_sender;
+
+        let mut runner_workers = Vec::with_capacity(no_workers);
         for id in 0..no_workers {
-            workers.push(worker::Worker::new(id, Arc::clone(&wreceiver)));
+            runner_workers.push(worker::Worker::new_cmd(
+                id,
+                Arc::clone(&runner_receiver),
+                Arc::clone(&processing_queue),
+            ));
         }
 
         Self {
-            _workers: workers,
-            _wqueue: wsender,
+            runner_workers,
+            runner_queue,
+
+            processing_worker,
+            processing_queue,
+
+            cvc5_enqueued: Box::from(HashSet::new()),
+            gcov_enqueued: Box::from(HashSet::new()),
         }
     }
 
-    pub fn enqueue_gcov(&self, db: &mut Db, benchmark: Benchmark) {
-        db.update_benchmark_status(benchmark.id, BenchStatus::Processing)
-            .expect("Could not update benchmark status");
-        self._wqueue.send(QueueMessage::GcovCmd(benchmark)).unwrap();
+    pub fn enqueue_gcov(&mut self, benchmark: Benchmark) {
+        if !self.gcov_enqueued.contains(&benchmark.id) {
+            self.gcov_enqueued.insert(benchmark.id);
+            self.processing_queue
+                .lock()
+                .unwrap()
+                .send(ProcessingQueueMessage::GcovStart(benchmark.id))
+                .unwrap();
+            self.runner_queue
+                .send(RunnerQueueMessage::GcovCmd(benchmark))
+                .unwrap();
+        }
     }
 
-    pub fn enqueue_cvc5(&self, db: &mut Db, benchmark: Benchmark) {
-        db.update_benchmark_status(benchmark.id, BenchStatus::Running)
-            .expect("Could not update benchmark status");
-        self._wqueue.send(QueueMessage::Cvc5Cmd(benchmark)).unwrap();
+    pub fn enqueue_cvc5(&mut self, benchmark: Benchmark) {
+        if !self.cvc5_enqueued.contains(&benchmark.id) {
+            self.cvc5_enqueued.insert(benchmark.id);
+            self.processing_queue
+                .lock()
+                .unwrap()
+                .send(ProcessingQueueMessage::Cvc5Start(benchmark.id))
+                .unwrap();
+            self.runner_queue
+                .send(RunnerQueueMessage::Cvc5Cmd(benchmark))
+                .unwrap();
+        }
     }
 
     pub fn stop(&mut self) {
-        self._wqueue.send(QueueMessage::Stop).unwrap();
+        self.runner_queue.send(RunnerQueueMessage::Stop).unwrap();
+        self.processing_queue
+            .lock()
+            .unwrap()
+            .send(ProcessingQueueMessage::Stop)
+            .unwrap();
     }
 
     pub fn join(&mut self) {
-        for worker in &mut self._workers {
+        for worker in &mut self.runner_workers {
             worker.join()
         }
+        self.processing_worker.join()
     }
 }

@@ -1,7 +1,9 @@
 use super::cvc5;
 use super::gcov;
-use super::QueueMessage;
+use super::ProcessingQueueMessage;
+use super::RunnerQueueMessage;
 use crate::db::Db;
+use crate::types::Status;
 use crate::ARGS;
 
 use log::{error, info};
@@ -17,25 +19,43 @@ pub(super) struct Worker {
 }
 
 impl Worker {
-    // FIXME: Don't have multiple writers, this will cause issues.
-    // Send the data back to a single writer thread and write things from there
-
-    pub(super) fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<QueueMessage>>>) -> Worker {
+    pub(super) fn new_cmd(
+        id: usize,
+        receiver: Arc<Mutex<mpsc::Receiver<RunnerQueueMessage>>>,
+        processing_queue: Arc<Mutex<mpsc::Sender<ProcessingQueueMessage>>>,
+    ) -> Worker {
         let thread = thread::spawn(move || loop {
-            let mut db = Db::new().expect("Could not connect to the DB in worker");
             let cvc5cmd = Path::join(&ARGS.build_dir, "bin/cvc5");
 
             let job = receiver.lock().unwrap().recv();
             match job {
-                Ok(QueueMessage::Cvc5Cmd(benchmark)) => {
+                Ok(RunnerQueueMessage::Cvc5Cmd(benchmark)) => {
                     info!("Worker {} got a job; executing.", id);
-                    cvc5::process(&mut db, &cvc5cmd, &benchmark)
+                    let result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
+                    processing_queue
+                        .lock()
+                        .unwrap()
+                        .send(ProcessingQueueMessage::Cvc5Res(benchmark, result))
+                        .unwrap();
                 }
-                Ok(QueueMessage::GcovCmd(benchmark)) => {
+                Ok(RunnerQueueMessage::GcovCmd(benchmark)) => {
                     info!("Worker {} got a job; executing.", id);
-                    gcov::process(&mut db, &benchmark)
+
+                    // Retry 10 times in case of an error
+                    let mut i = 0;
+                    while i < 10 {
+                        if let Some(result) = gcov::process(&benchmark) {
+                            processing_queue
+                                .lock()
+                                .unwrap()
+                                .send(ProcessingQueueMessage::GcovRes(benchmark, result))
+                                .unwrap();
+                            break;
+                        }
+                        i += 1;
+                    }
                 }
-                Ok(QueueMessage::Stop) => {
+                Ok(RunnerQueueMessage::Stop) => {
                     info!("Worker {} received stop signal; shutting down.", id);
                     break;
                 }
@@ -48,6 +68,52 @@ impl Worker {
 
         Worker {
             _id: id,
+            _thread: Some(thread),
+        }
+    }
+
+    pub(super) fn new_processing(receiver: mpsc::Receiver<ProcessingQueueMessage>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let mut db = Db::new().expect("Could not connect to the DB in worker");
+
+            let job = receiver.recv();
+            match job {
+                Ok(ProcessingQueueMessage::Cvc5Start(benchmark_id)) => {
+                    info!("Processing Worker got a cvc5 start event.");
+                    db.update_benchmark_status(benchmark_id, Status::Running)
+                        .expect("Could not update benchmark status");
+                }
+                Ok(ProcessingQueueMessage::GcovStart(benchmark_id)) => {
+                    info!("Processing Worker got a gcov start event.");
+                    db.update_benchmark_status(benchmark_id, Status::Processing)
+                        .expect("Could not update benchmark status");
+                }
+                Ok(ProcessingQueueMessage::Cvc5Res(benchmark, result)) => {
+                    info!("Processing Worker got a cvc5 result.");
+                    db.add_cvc5_run_result(result).unwrap();
+                    db.update_benchmark_status(benchmark.id, Status::WaitingProcessing)
+                        .unwrap();
+                }
+                Ok(ProcessingQueueMessage::GcovRes(benchmark, result)) => {
+                    info!("Processing Worker got a gcov result.");
+                    db.update_benchmark_status(benchmark.id, Status::Done)
+                        .unwrap();
+
+                    // TODO: Process result
+                }
+                Ok(ProcessingQueueMessage::Stop) => {
+                    info!("Processing Worker received stop signal; shutting down.");
+                    break;
+                }
+                Err(_) => {
+                    error!("Processing Worker disconnected; shutting down.");
+                    break;
+                }
+            }
+        });
+
+        Worker {
+            _id: 0,
             _thread: Some(thread),
         }
     }

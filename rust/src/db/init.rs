@@ -61,6 +61,10 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                start_col INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                end_col INTEGER NOT NULL,
                 UNIQUE(source_id, name),
                 FOREIGN KEY (source_id) REFERENCES sources(id)
             )";
@@ -107,7 +111,7 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 func_id INTEGER NOT NULL,
-                usage TEXT NOT NULL,
+                usage INTEGER NOT NULL,
                 UNIQUE(bench_id, func_id),
                 FOREIGN KEY (func_id) REFERENCES functions(id),
                 FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
@@ -120,7 +124,7 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 line_id INTEGER NOT NULL,
-                usage TEXT NOT NULL,
+                usage INTEGER NOT NULL,
                 UNIQUE(bench_id, line_id),
                 FOREIGN KEY (line_id) REFERENCES lines(id),
                 FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
@@ -133,7 +137,7 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 branch_id INTEGER NOT NULL,
-                usage TEXT NOT NULL,
+                usage INTEGER NOT NULL,
                 UNIQUE(bench_id, branch_id),
                 FOREIGN KEY (branch_id) REFERENCES branches(id),
                 FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
@@ -165,7 +169,7 @@ pub(super) fn populate_config(conn: &Connection) -> ResultT<()> {
 }
 
 pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
-    // FIXME: Readd sampling support
+    // TODO: Readd sampling support
     let mut stmt = conn.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
     let prefix_base = Path::new("/tmp/asdf");
@@ -190,7 +194,7 @@ pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
             let file = file.canonicalize().unwrap().display().to_string();
             let prefix = prefix.canonicalize().unwrap().display().to_string();
 
-            // FIXME: Instead of storing the full path only store the difference
+            // TODO: Instead of storing the full path only store the difference
             // due to file size reasons
 
             stmt.execute(params![file, prefix])?;
@@ -201,7 +205,7 @@ pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
 }
 
 pub(super) fn populate_status(conn: &Connection) -> ResultT<()> {
-    // FIXME: Readd sampling support
+    // TODO: Readd sampling support
     let mut select_stmt = conn.prepare("SELECT id FROM \"benchmarks\"")?;
     let bench_rows = select_stmt.query_map([], |row| {
         let id: u64 = row.get(0)?;
@@ -213,31 +217,6 @@ pub(super) fn populate_status(conn: &Connection) -> ResultT<()> {
     for row in bench_rows {
         let bench_id = row.unwrap();
         stmt.execute(params![bench_id, Status::Waiting as u64])?;
-    }
-
-    Ok(())
-}
-
-// NOTE pjordan: This would require us to
-pub(super) fn _populate_sources(conn: &Connection) -> ResultT<()> {
-    let mut stmt = conn.prepare("INSERT INTO \"sources\" (path, prefix) VALUES (?1, ?2)")?;
-
-    let build_dir = &ARGS.build_dir;
-    let build_dir = build_dir.canonicalize().unwrap().display().to_string();
-    let pattern = format!("{}/**/*.gcno", build_dir);
-
-    for entry in glob(&pattern).expect("Failed to read glob pattern") {
-        if let Ok(file) = entry {
-            // FIXME: This will be of the form src/CMakeFiles/cvc5-obj.dir/.../*.cpp
-            // It would be best if I could also strip the CMakeFiles/cvc5-obj.dir
-            // But first I will have to check it for consistency
-            let file = file
-                .strip_prefix(&build_dir)
-                .expect("Error while stripping common prefix from gcno file");
-            let src_file = file.to_str().unwrap();
-            let src_file = &src_file[..src_file.len() - 5];
-            stmt.execute(params![src_file])?;
-        }
     }
 
     Ok(())
