@@ -10,6 +10,7 @@ pub enum Status {
     Done,
 }
 
+#[derive(Clone)]
 pub struct FilePosition {
     pub line: u32,
     pub col: u32,
@@ -63,6 +64,7 @@ pub struct BenchmarkRun {
     pub stderr: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct GcovFuncResult {
     pub name: String,
     pub start: FilePosition,
@@ -70,6 +72,7 @@ pub struct GcovFuncResult {
     pub usage: u32,
 }
 
+#[derive(Clone)]
 pub struct GcovLineResult {
     pub line_no: u32,
     pub usage: u32,

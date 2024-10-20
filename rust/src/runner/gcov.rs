@@ -8,46 +8,57 @@ use std::collections::HashMap;
 use std::os::unix::fs::symlink;
 use std::process::Command;
 
-pub(super) fn process(benchmark: &Benchmark) -> Option<Vec<InterpretedGcov>> {
+pub type GcovRes = HashMap<String, (Vec<GcovFuncResult>, Vec<GcovLineResult>)>;
+
+pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = benchmark.prefix.display().to_string();
     let pattern = format!("{}/**/*.gcda", prefix_dir);
 
-    let mut results: Vec<InterpretedGcov> = vec![];
+    let mut result: GcovRes = HashMap::new();
     for entry in glob(&pattern).expect("Failed to read glob pattern") {
         if let Ok(gcda_file) = entry {
             let gcno_file_dst = gcda_file.to_str().unwrap();
             let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
+            println!("{:?} {:?}", gcno_file_dst, prefix_dir);
             let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
-            symlink(&gcno_file_src, &gcno_file_dst).expect("Error while trying to create symlink");
+            symlink(&gcno_file_src, &gcno_file_dst).unwrap_or(());
 
             let args = ["--json", "--stdout", gcda_file.to_str().unwrap()];
             let output = Command::new("gcov")
                 .args(&args)
                 .output()
                 .expect("Could not capture output of gcov...");
+            let stderr = String::from_utf8(output.stderr).unwrap();
             if !output.status.success() {
                 error!(
                     "Gcov failed with error!\n GCDA File: {:?} \n ERROR: {:?}",
-                    &gcda_file, &output.stderr
+                    &gcda_file, stderr
                 );
-                return None;
+                continue;
             }
-
             let gcov_json: GcovJson =
                 serde_json::from_slice(&output.stdout).expect("Error parsing gcov json output");
 
-            results.push(
-                interpret_gcov(&gcov_json).expect("Could not interpret gcov output properly"),
-            );
+            for (key, value) in interpret_gcov(&gcov_json)
+                .expect("Could not interpret gcov output properly")
+                .iter_mut()
+            {
+                if !result.contains_key(key) {
+                    result.insert(key.clone(), value.clone());
+                } else {
+                    let (funcs, lines) = result.get_mut(key).unwrap();
+                    funcs.append(&mut value.0);
+                    lines.append(&mut value.1);
+                }
+            }
         }
     }
 
-    return Some(results);
+    return result;
 }
 
-pub type InterpretedGcov = HashMap<String, (Vec<GcovFuncResult>, Vec<GcovLineResult>)>;
-fn interpret_gcov(json: &GcovJson) -> ResultT<InterpretedGcov> {
-    let mut result: InterpretedGcov = HashMap::new();
+fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
+    let mut result: GcovRes = HashMap::new();
 
     for file in &json.files {
         let mut funcs: Vec<GcovFuncResult> = vec![];

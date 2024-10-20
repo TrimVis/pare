@@ -1,7 +1,8 @@
 mod cvc5;
 mod gcov;
 mod worker;
-use gcov::InterpretedGcov;
+pub use gcov::GcovRes;
+use log::error;
 
 use crate::types::{Benchmark, BenchmarkRun};
 use crate::ARGS;
@@ -19,7 +20,7 @@ enum ProcessingQueueMessage {
     Cvc5Start(u64),
     GcovStart(u64),
     Cvc5Res(Benchmark, BenchmarkRun),
-    GcovRes(Benchmark, Vec<InterpretedGcov>),
+    GcovRes(Benchmark, GcovRes),
     Stop,
 }
 
@@ -84,6 +85,7 @@ impl Runner {
     }
 
     pub fn enqueue_cvc5(&mut self, benchmark: Benchmark) {
+        // Safety guard, not necessary
         if !self.cvc5_enqueued.contains(&benchmark.id) {
             self.cvc5_enqueued.insert(benchmark.id);
             self.processing_queue
@@ -94,6 +96,8 @@ impl Runner {
             self.runner_queue
                 .send(RunnerQueueMessage::Cvc5Cmd(benchmark))
                 .unwrap();
+        } else {
+            error!("Reached theoretically unreachable code");
         }
     }
 

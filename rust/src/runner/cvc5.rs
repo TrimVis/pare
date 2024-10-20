@@ -10,27 +10,32 @@ pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Benchmark
     let cmd = &mut Command::new(cvc5cmd);
     let cmd = cmd
         .env("GCOV_PREFIX", benchmark.prefix.display().to_string())
-        .args(&[&ARGS.cvc5_args, &benchmark.path.display().to_string()]);
+        .args(&["--tlimit", "5000", &benchmark.path.display().to_string()]);
 
     let start = Instant::now();
     let output = cmd.output().expect("Could not capture output of cvc5...");
     let duration = start.elapsed();
 
+    let stderr = String::from_utf8(output.stderr).unwrap();
     if !output.status.success() {
         error!(
             "CVC5 failed with error!\n Benchmark File: {:?} \n ERROR: {:?}",
-            &benchmark.path, &output.stderr
+            &benchmark.path, &stderr
+        );
+        error!(
+            "Args: {:?}",
+            [&ARGS.cvc5_args, &benchmark.path.display().to_string()]
         );
     }
 
     return Some(BenchmarkRun {
         bench_id: benchmark.id,
-        exit_code: output.status.code().unwrap(),
+        exit_code: output.status.code().unwrap_or(5),
         time_ms: duration
             .as_millis()
             .try_into()
             .expect("Duration too long for 64 bits"),
         stdout: Some(String::from_utf8(output.stdout).expect("Error decoding cvc5 stdout")),
-        stderr: Some(String::from_utf8(output.stderr).expect("Error decoding cvc5 stderr")),
+        stderr: Some(stderr),
     });
 }

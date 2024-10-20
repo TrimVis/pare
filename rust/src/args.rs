@@ -14,7 +14,7 @@ pub struct CliArgs {
     pub build_dir: PathBuf,
 
     /// Arguments for cvc5
-    #[arg(short = 'a', long)]
+    #[arg(short = 'a', long, default_value = "--tlimit 2000")]
     pub cvc5_args: String,
 
     /// Sample size ("all", or comma-separated values)

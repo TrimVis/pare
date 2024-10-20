@@ -41,19 +41,12 @@ impl Worker {
                 Ok(RunnerQueueMessage::GcovCmd(benchmark)) => {
                     info!("Worker {} got a job; executing.", id);
 
-                    // Retry 10 times in case of an error
-                    let mut i = 0;
-                    while i < 10 {
-                        if let Some(result) = gcov::process(&benchmark) {
-                            processing_queue
-                                .lock()
-                                .unwrap()
-                                .send(ProcessingQueueMessage::GcovRes(benchmark, result))
-                                .unwrap();
-                            break;
-                        }
-                        i += 1;
-                    }
+                    let result = gcov::process(&benchmark);
+                    processing_queue
+                        .lock()
+                        .unwrap()
+                        .send(ProcessingQueueMessage::GcovRes(benchmark, result))
+                        .unwrap();
                 }
                 Ok(RunnerQueueMessage::Stop) => {
                     info!("Worker {} received stop signal; shutting down.", id);
@@ -74,7 +67,7 @@ impl Worker {
 
     pub(super) fn new_processing(receiver: mpsc::Receiver<ProcessingQueueMessage>) -> Worker {
         let thread = thread::spawn(move || loop {
-            let mut db = Db::new().expect("Could not connect to the DB in worker");
+            let mut db = Db::connect().expect("Could not connect to the DB in worker");
 
             let job = receiver.recv();
             match job {
@@ -83,23 +76,22 @@ impl Worker {
                     db.update_benchmark_status(benchmark_id, Status::Running)
                         .expect("Could not update benchmark status");
                 }
-                Ok(ProcessingQueueMessage::GcovStart(benchmark_id)) => {
-                    info!("Processing Worker got a gcov start event.");
-                    db.update_benchmark_status(benchmark_id, Status::Processing)
-                        .expect("Could not update benchmark status");
-                }
                 Ok(ProcessingQueueMessage::Cvc5Res(benchmark, result)) => {
                     info!("Processing Worker got a cvc5 result.");
                     db.add_cvc5_run_result(result).unwrap();
                     db.update_benchmark_status(benchmark.id, Status::WaitingProcessing)
                         .unwrap();
                 }
+                Ok(ProcessingQueueMessage::GcovStart(benchmark_id)) => {
+                    info!("Processing Worker got a gcov start event.");
+                    db.update_benchmark_status(benchmark_id, Status::Processing)
+                        .expect("Could not update benchmark status");
+                }
                 Ok(ProcessingQueueMessage::GcovRes(benchmark, result)) => {
                     info!("Processing Worker got a gcov result.");
+                    db.add_gcov_measurement(benchmark.id, result).unwrap();
                     db.update_benchmark_status(benchmark.id, Status::Done)
                         .unwrap();
-
-                    // TODO: Process result
                 }
                 Ok(ProcessingQueueMessage::Stop) => {
                     info!("Processing Worker received stop signal; shutting down.");

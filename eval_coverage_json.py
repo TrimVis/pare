@@ -17,7 +17,7 @@ import tree_sitter_cpp as tscpp
 from tree_sitter import Language, Parser
 from typing import Literal
 
-from plotnine import ggplot, aes, geom_point, theme_minimal, labs, theme, element_blank, facet_wrap, geom_hline, annotate, scale_color_manual, scale_y_log10, geom_line, facet_wrap
+from plotnine import ggplot, aes, geom_point, theme_minimal, labs, theme, element_blank, facet_wrap, geom_hline, annotate, scale_color_manual, scale_y_log10, geom_line, facet_wrap, geom_histogram
 
 
 
@@ -87,12 +87,17 @@ def _lookup_function_name(src_code: str, file_path: str, line_no: int) -> str:
     # TODO pjordan: I don't think this fallback is really needed
     # Figure out what types the nodes are for which this fails
 
+    print()
+    print(f"Src Code: \t {src_code}\n File Path: \t {file_path}\n Line Start No: \t {line_no}\n")
+    print(f"Couldn't find function lenght using TreeSitter, falling back to dumb lookup")
+
     full_path = os.path.join(src_code, file_path)
     with open(full_path, 'r') as f:
         for i, line in enumerate(f, start=1):
             if i == line_no:
                 return (line.strip().rstrip("{"), (line_no,-1))
 
+    print(f"Dumb lookup failed")
     # Not enough line numbers in this file
     return ("-", (-1,-1))
 
@@ -361,8 +366,38 @@ class Plotter:
         cur.execute(query)
         data = cur.fetchall()
 
-        return (data, column_names)
+        res = []
+        for d in data:
+            file = d[2]
+            if not file.startswith("src/") and not file.startswith("build/"): 
+                continue
+            res.append(d)
 
+
+        return (res, column_names)
+
+    def distribution(self, db_file: str="./coverage_db.sqlite", kind: KindT = "func", log_scale=True, output: str=None):
+        (res_data, res_header) = self._read_from_db(db_file, kind, None)
+        df = pd.DataFrame(res_data, columns=res_header)
+        print(res_header, flush=True)
+
+        logger.info(f"Creating plot")
+        title =f"Distribution of {kind} run counts"
+        plot = (
+            ggplot(df, aes(x='execution_count')) +
+            geom_histogram(bins=20, color='black', fill='blue', alpha=0.7) +
+            labs(title=f'Distribution of run_counts', x=f'{kind} Values', y='Frequency') +
+            theme_minimal()
+        )
+        if log_scale:
+            plot = plot + scale_y_log10()
+
+        if output:
+            logger.info(f"Storing plot at {output}")
+            plot.save(output, width=8, height=6, dpi=300)
+        else:
+            logger.info(f"Opening plot preview")
+            plot.show()
 
     def line_usage(self, db_file: str="./coverage_db.sqlite", output: str=None, cutoff: int = None, log_scale: bool = False, percentile_categories: bool = False):
         (res_data, res_header) = self._read_from_db(db_file, "line",  cutoff)

@@ -1,5 +1,6 @@
 mod init;
 mod stmts;
+use crate::runner::GcovRes;
 use crate::types::{Benchmark, BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
 
@@ -19,6 +20,13 @@ impl<'a> Db<'a> {
         let conn = Rc::new(Connection::open(&ARGS.result_db)?);
         info!("Creating tables...");
         init::create_tables(&conn).expect("Issue during table creation");
+        let stmts = stmts::Stmts::new(Rc::clone(&conn))?;
+
+        Ok(Db { conn, stmts })
+    }
+
+    pub fn connect() -> ResultT<Self> {
+        let conn = Rc::new(Connection::open(&ARGS.result_db)?);
         let stmts = stmts::Stmts::new(Rc::clone(&conn))?;
 
         Ok(Db { conn, stmts })
@@ -109,8 +117,40 @@ impl<'a> Db<'a> {
         Ok(())
     }
 
-    // TODO IMplement me
-    pub fn add_gcov_measurement(&self) -> ResultT<()> {
+    pub fn add_gcov_measurement(&self, bench_id: u64, run_result: GcovRes) -> ResultT<()> {
+        for (file, (func, lines)) in run_result {
+            self.stmts
+                .insert_source
+                .borrow_mut()
+                .execute(params![file])?;
+            let src_id = self.conn.last_insert_rowid();
+            for f in func {
+                self.stmts.insert_function.borrow_mut().execute(params![
+                    src_id,
+                    f.name,
+                    f.start.line,
+                    f.start.col,
+                    f.end.line,
+                    f.end.col
+                ])?;
+                let func_id = self.conn.last_insert_rowid();
+                self.stmts
+                    .insert_function_usage
+                    .borrow_mut()
+                    .execute(params![bench_id, func_id, f.usage]);
+            }
+            for l in lines {
+                self.stmts
+                    .insert_line
+                    .borrow_mut()
+                    .execute(params![src_id, l.line_no, l.usage])?;
+                let line_id = self.conn.last_insert_rowid();
+                self.stmts
+                    .insert_line_usage
+                    .borrow_mut()
+                    .execute(params![bench_id, line_id, l.usage]);
+            }
+        }
         Ok(())
     }
 }
