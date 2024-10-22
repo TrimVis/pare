@@ -5,7 +5,8 @@ use crate::types::{Benchmark, BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
 
 use log::info;
-use rusqlite::{params, Connection};
+use rusqlite::{params, params_from_iter, Connection};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -118,50 +119,203 @@ impl<'a> Db<'a> {
     }
 
     pub fn add_gcov_measurement(&self, bench_id: u64, run_result: GcovRes) -> ResultT<()> {
-        for (file, (func, lines)) in run_result {
-            info!("Inserting gcov_measurement for file: {}", file);
-            self.stmts
-                .insert_source
-                .borrow_mut()
-                .execute(params![file])
-                .expect("Could not insert into source");
-            let src_id = self.conn.last_insert_rowid();
-            info!("Inserting functions for file: {}", file);
-            for f in func {
-                self.stmts
-                    .insert_function
-                    .borrow_mut()
-                    .execute(params![
-                        src_id,
-                        f.name,
-                        f.start.line,
-                        f.start.col,
-                        f.end.line,
-                        f.end.col
-                    ])
-                    .expect("Could not insert function");
-                let func_id = self.conn.last_insert_rowid();
-                self.stmts
-                    .insert_function_usage
-                    .borrow_mut()
-                    .execute(params![bench_id, func_id, f.usage])
-                    .expect("Could not insert gcov function measurement result");
-            }
-            info!("Inserting lines for file: {}", file);
-            for l in lines {
-                self.stmts
-                    .insert_line
-                    .borrow_mut()
-                    .execute(params![src_id, l.line_no])
-                    .expect("Could not insert into lines");
-                let line_id = self.conn.last_insert_rowid();
-                self.stmts
-                    .insert_line_usage
-                    .borrow_mut()
-                    .execute(params![bench_id, line_id, l.usage])
-                    .expect("Could not insert gcov line measurement result");
+        // TODO: Instead of hardcoding this chunk size detect it at runtime (PRAGMA compile_options)
+        let max_var_count = 250000;
+
+        // 1. Ensure all sources exist in DB & retrieve their ids
+        let mut src_args = vec![];
+        for (file, _) in &run_result {
+            src_args.push(file);
+        }
+        for src_args_chunk in src_args.chunks(max_var_count) {
+            let src_placeholders = src_args_chunk
+                .iter()
+                .map(|_| "(?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+            let src_query = format!(
+                "INSERT INTO \"sources\" ( path ) VALUES {}",
+                src_placeholders
+            );
+            self.conn
+                .execute(&src_query, params_from_iter(src_args_chunk.iter()))
+                .expect("Could not insert src chunk");
+        }
+
+        let mut stmt = self.conn.prepare("SELECT id, path FROM \"sources\"")?;
+        let rows = stmt.query_map(params![], |row| {
+            let id: u64 = row.get(0)?;
+            let file: String = row.get(1)?;
+            Ok((file, id))
+        })?;
+        let mut srcid_file_map: HashMap<String, u64> = HashMap::with_capacity(rows.size_hint().0);
+        for row in rows {
+            let (file, id) = row?;
+            srcid_file_map.insert(file, id);
+        }
+
+        // 2. Ensure all functions exist in DB & retrieve their ids
+        let mut func_args: Vec<String> = vec![];
+        for (file, (funcs, _)) in &run_result {
+            let sid = srcid_file_map.get(file).unwrap();
+            for func in funcs {
+                let f_args: String = format!(
+                    "({}, {}, {}, {}, {}, {})",
+                    sid.to_string(),
+                    func.name.to_string(),
+                    func.start.line.to_string(),
+                    func.start.col.to_string(),
+                    func.end.line.to_string(),
+                    func.end.col.to_string(),
+                );
+                func_args.push(f_args);
             }
         }
+
+        for func_args_chunk in func_args.chunks(max_var_count) {
+            let func_placeholders = func_args_chunk
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let func_query = format!(
+                "INSERT INTO \"functions\" (
+                source_id,
+                name,
+                start_line,
+                start_col,
+                end_line,
+                end_col
+            ) VALUES {} ON CONFLICT DO NOTHING",
+                func_placeholders
+            );
+            self.conn
+                .execute(&func_query, params_from_iter(func_args_chunk))
+                .expect("Could not insert function chunk");
+        }
+
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, source_id, name FROM \"functions\"")?;
+        let rows = stmt.query_map(params![], |row| {
+            let id: u64 = row.get(0)?;
+            let source_id: u64 = row.get(1)?;
+            let name: String = row.get(2)?;
+            Ok(((source_id, name), id))
+        })?;
+        let mut id_fname_map: HashMap<(u64, String), u64> =
+            HashMap::with_capacity(rows.size_hint().0);
+        for row in rows {
+            let (key, value) = row?;
+            id_fname_map.insert(key, value);
+        }
+
+        // 3. Insert all function usage data into the DB
+        let mut funcusage_args: Vec<u64> = vec![];
+        for (file, (funcs, _)) in &run_result {
+            let sid = srcid_file_map.get(file).unwrap();
+            for func in funcs {
+                let funcid = id_fname_map.get(&(*sid, func.name.to_string())).unwrap();
+                let mut f_args: Vec<u64> = vec![bench_id, *funcid, func.usage.into()];
+                funcusage_args.append(&mut f_args);
+            }
+        }
+
+        for funcusage_args_chunk in func_args.chunks(max_var_count / 3) {
+            let funcusage_placeholders = funcusage_args_chunk
+                .iter()
+                .map(|_| "(?, ?, ?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let funcusage_query = format!(
+                "INSERT INTO \"usage_functions\" (
+                bench_id,
+                func_id,
+                usage,
+            ) VALUES {}",
+                funcusage_placeholders
+            );
+            self.conn
+                .execute(&funcusage_query, params_from_iter(funcusage_args_chunk))
+                .expect("Could not insert function usage chunk");
+        }
+
+        // 4. Ensure all lines exist in DB & retrieve their ids
+        let mut line_args: Vec<u64> = vec![];
+        for (file, (_, lines)) in &run_result {
+            let sid = srcid_file_map.get(file).unwrap();
+            for line in lines {
+                let mut l_args: Vec<u64> = vec![*sid, line.line_no.into()];
+                line_args.append(&mut l_args);
+            }
+        }
+
+        for line_args_chunk in line_args.chunks(max_var_count / 2) {
+            let line_placeholders = line_args_chunk
+                .iter()
+                .map(|_| "(?, ?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let func_query = format!(
+                "INSERT INTO \"lines\" (
+                source_id,
+                line_no
+            ) VALUES {} ON CONFLICT DO NOTHING",
+                line_placeholders
+            );
+            self.conn
+                .execute(&func_query, params_from_iter(line_args_chunk))
+                .expect("Could not insert line chunk");
+        }
+
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, source_id, line_no FROM \"lines\"")?;
+        let rows = stmt.query_map(params![], |row| {
+            let id: u64 = row.get(0)?;
+            let source_id: u64 = row.get(1)?;
+            let line_no: u64 = row.get(2)?;
+            Ok(((source_id, line_no), id))
+        })?;
+        let mut id_line_map: HashMap<(u64, u64), u64> = HashMap::with_capacity(rows.size_hint().0);
+        for row in rows {
+            let (key, value) = row?;
+            id_line_map.insert(key, value);
+        }
+        // 5. Insert all line usage data into the DB
+        let mut lineusage_args: Vec<u64> = vec![];
+        for (file, (_, lines)) in &run_result {
+            let sid = srcid_file_map.get(file).unwrap();
+            for line in lines {
+                let lineid = id_line_map.get(&(*sid, line.line_no.into())).unwrap();
+                let mut f_args: Vec<u64> = vec![bench_id, *lineid, line.usage.into()];
+                lineusage_args.append(&mut f_args);
+            }
+        }
+
+        for lineusage_args_chunk in lineusage_args.chunks(max_var_count / 3) {
+            let lineusage_placeholders = lineusage_args_chunk
+                .iter()
+                .map(|_| "(?, ?, ?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let lineusage_query = format!(
+                "INSERT INTO \"usage_lines\" (
+                bench_id,
+                line_id,
+                usage,
+            ) VALUES {}",
+                lineusage_placeholders
+            );
+            self.conn
+                .execute(&lineusage_query, params_from_iter(lineusage_args_chunk))
+                .expect("Could not insert line usage chunk");
+        }
+
         Ok(())
     }
 }

@@ -111,8 +111,7 @@ impl Worker {
                             "Processing Worker got a gcov result. (bench_id: {})",
                             benchmark.id
                         );
-                        db.add_gcov_measurement(benchmark.id, result)
-                            .expect("Issued while trying to insert gcov measurements");
+                        db.add_gcov_measurement(benchmark.id, result).unwrap();
                         db.update_benchmark_status(benchmark.id, Status::Done)
                             .expect("Could not update bench status");
                     }
