@@ -6,7 +6,7 @@ use crate::args::ARGS;
 use crate::types::ResultT;
 
 use fern::Dispatch;
-use log::{error, info, warn};
+pub use log::{error, info, warn};
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -53,10 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Sample Size: {} \tArgs: {}",
         ARGS.sample_size, ARGS.cvc5_args,
     );
-
-    info!("This is a info message.");
-    warn!("This is a warning message.");
-    error!("This is an error message.");
 
     // Runner Setup
     let mut runner = runner::Runner::new();

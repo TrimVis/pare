@@ -81,6 +81,11 @@ impl Runner {
             self.runner_queue
                 .send(RunnerQueueMessage::GcovCmd(benchmark))
                 .unwrap();
+        } else {
+            error!(
+                "Reached theoretically unreachable code (enqueue_gcov) - bech_id: {}",
+                benchmark.id
+            );
         }
     }
 
@@ -97,7 +102,10 @@ impl Runner {
                 .send(RunnerQueueMessage::Cvc5Cmd(benchmark))
                 .unwrap();
         } else {
-            error!("Reached theoretically unreachable code");
+            error!(
+                "Reached theoretically unreachable code (enqueue_cvc5) - bech_id: {}",
+                benchmark.id
+            );
         }
     }
 

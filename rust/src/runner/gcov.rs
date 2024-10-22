@@ -1,3 +1,4 @@
+use crate::args::ARGS;
 use crate::types::{Benchmark, FilePosition, GcovFuncResult, GcovLineResult, ResultT};
 
 use glob::glob;
@@ -19,7 +20,6 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         if let Ok(gcda_file) = entry {
             let gcno_file_dst = gcda_file.to_str().unwrap();
             let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
-            println!("{:?} {:?}", gcno_file_dst, prefix_dir);
             let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
             symlink(&gcno_file_src, &gcno_file_dst).unwrap_or(());
 
@@ -61,8 +61,11 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     let mut result: GcovRes = HashMap::new();
 
     for file in &json.files {
+        // Filter out libraries unless specified otherwise
+        if !ARGS.no_ignore_libs && file.file.starts_with("/usr/include") {
+            continue;
+        }
         let mut funcs: Vec<GcovFuncResult> = vec![];
-        println!("Processing file: {}", file.file);
         for function in &file.functions {
             funcs.push(GcovFuncResult {
                 name: function.demangled_name.clone(),

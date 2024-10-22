@@ -38,7 +38,7 @@ impl<'a> Stmts<'a> {
 
         let insert_line = Rc::new(RefCell::new(
             conn.prepare(
-                "INSERT INTO \"lines\" (
+                "INSERT OR REPLACE INTO \"lines\" (
                 source_id,
                 line_no
             ) VALUES (?1, ?2)",
@@ -59,7 +59,7 @@ impl<'a> Stmts<'a> {
 
         let insert_function = Rc::new(RefCell::new(
             conn.prepare(
-                "INSERT INTO \"functions\" (
+                "INSERT OR REPLACE INTO \"functions\" (
                 source_id,
                 name,
                 start_line,

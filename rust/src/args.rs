@@ -1,9 +1,23 @@
 use clap::Parser;
+use mktemp::Temp;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
 
+use crate::info;
+
 // Global static variable to store parsed CLI arguments
-pub static ARGS: Lazy<CliArgs> = Lazy::new(|| CliArgs::parse());
+pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
+    let mut args = CliArgs::parse();
+    // Initialize `tmp_dir` if it hasn't been explicitly provided
+    if args.tmp_dir.is_none() {
+        args.tmp_dir = Some(Temp::new_dir().unwrap().to_path_buf());
+        info!(
+            "Using temp directory '{}' for intermediate gcov results",
+            args.tmp_dir.as_ref().unwrap().display().to_string()
+        )
+    }
+    args
+});
 
 /// Benchmark coverage script.
 #[derive(Parser, Debug)]
@@ -33,9 +47,17 @@ pub struct CliArgs {
     #[arg(short = 'v', long, action = clap::ArgAction::SetTrue)]
     pub verbose: bool,
 
+    /// Don't filter out outside libraries from coverage analysis
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub no_ignore_libs: bool,
+
     /// Additional log file that is being logged to
     #[arg(long, default_value = "./output.log")]
     pub log_file: PathBuf,
+
+    // Temporary directory where the GCOV outputs are stored
+    #[arg(long, default_value = None)]
+    pub tmp_dir: Option<PathBuf>,
 
     /// Benchmark directory
     pub benchmark_dir: PathBuf,

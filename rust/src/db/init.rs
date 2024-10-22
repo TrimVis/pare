@@ -172,7 +172,7 @@ pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
     // TODO: Readd sampling support
     let mut stmt = conn.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
-    let prefix_base = Path::new("/tmp/asdf");
+    let prefix_base = ARGS.tmp_dir.as_ref().unwrap();
     fs::create_dir_all(&prefix_base)
         .expect("Could not create temporary base folder for prefix files");
 

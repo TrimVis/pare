@@ -119,36 +119,47 @@ impl<'a> Db<'a> {
 
     pub fn add_gcov_measurement(&self, bench_id: u64, run_result: GcovRes) -> ResultT<()> {
         for (file, (func, lines)) in run_result {
+            info!("Inserting gcov_measurement for file: {}", file);
             self.stmts
                 .insert_source
                 .borrow_mut()
-                .execute(params![file])?;
+                .execute(params![file])
+                .expect("Could not insert into source");
             let src_id = self.conn.last_insert_rowid();
+            info!("Inserting functions for file: {}", file);
             for f in func {
-                self.stmts.insert_function.borrow_mut().execute(params![
-                    src_id,
-                    f.name,
-                    f.start.line,
-                    f.start.col,
-                    f.end.line,
-                    f.end.col
-                ])?;
+                self.stmts
+                    .insert_function
+                    .borrow_mut()
+                    .execute(params![
+                        src_id,
+                        f.name,
+                        f.start.line,
+                        f.start.col,
+                        f.end.line,
+                        f.end.col
+                    ])
+                    .expect("Could not insert function");
                 let func_id = self.conn.last_insert_rowid();
                 self.stmts
                     .insert_function_usage
                     .borrow_mut()
-                    .execute(params![bench_id, func_id, f.usage]);
+                    .execute(params![bench_id, func_id, f.usage])
+                    .expect("Could not insert gcov function measurement result");
             }
+            info!("Inserting lines for file: {}", file);
             for l in lines {
                 self.stmts
                     .insert_line
                     .borrow_mut()
-                    .execute(params![src_id, l.line_no, l.usage])?;
+                    .execute(params![src_id, l.line_no])
+                    .expect("Could not insert into lines");
                 let line_id = self.conn.last_insert_rowid();
                 self.stmts
                     .insert_line_usage
                     .borrow_mut()
-                    .execute(params![bench_id, line_id, l.usage]);
+                    .execute(params![bench_id, line_id, l.usage])
+                    .expect("Could not insert gcov line measurement result");
             }
         }
         Ok(())

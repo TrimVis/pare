@@ -10,8 +10,11 @@ __pycache__
 *.csv
 *.sqlite
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.out
 *.cpp
 *.backup
+output.log
 gurobi.lic
 
