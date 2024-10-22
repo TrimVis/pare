@@ -14,10 +14,12 @@ pub(super) fn prepare(conn: &RefCell<Connection>) -> ResultT<()> {
     conn.execute("PRAGMA synchronous = OFF", [])?;
     // Increase cache size to 1GB
     conn.execute("PRAGMA cache_size = -1000000", [])?;
+    // Increase page size to 64kB
+    conn.execute("PRAGMA page_size = 65536", [])?;
     // Store temporary tables in memory
     conn.execute("PRAGMA temp_store = MEMORY", [])?;
-    // Enable support for foreign keys
-    conn.execute("PRAGMA foreign_keys = ON", [])?;
+    // // Enable support for foreign keys
+    // conn.execute("PRAGMA foreign_keys = ON", [])?;
     // Enable write-ahead-log for increased write performance
     conn.query_row("PRAGMA journal_mode = WAL", [], |_row| Ok(()))?;
 
@@ -68,8 +70,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 start_col INTEGER NOT NULL,
                 end_line INTEGER NOT NULL,
                 end_col INTEGER NOT NULL,
-                UNIQUE(source_id, name),
-                FOREIGN KEY (source_id) REFERENCES sources(id)
+                UNIQUE(source_id, name)
             )";
     conn.execute(&func_table, [])
         .expect("Issue during functions table creation");
@@ -79,8 +80,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 branch_no INTEGER NOT NULL,
-                UNIQUE(source_id, branch_no),
-                FOREIGN KEY (source_id) REFERENCES sources(id)
+                UNIQUE(source_id, branch_no)
             )";
     conn.execute(&branch_table, [])
         .expect("Issue during branches table creation");
@@ -90,8 +90,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 id INTEGER PRIMARY KEY,
                 source_id INTEGER NOT NULL,
                 line_no INTEGER NOT NULL,
-                UNIQUE(source_id, line_no),
-                FOREIGN KEY (source_id) REFERENCES sources(id)
+                UNIQUE(source_id, line_no)
             )";
     conn.execute(&line_table, [])
         .expect("Issue during lines table creation");
@@ -103,8 +102,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 time_ms INTEGER NOT NULL,
                 exit_code INTEGER NOT NULL,
                 stdout TEXT NOT NULL,
-                stderr TEXT NOT NULL,
-                FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
+                stderr TEXT NOT NULL
             )";
     conn.execute(&results_table, [])
         .expect("Issue during result_benchmarks table creation");
@@ -115,9 +113,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 bench_id INTEGER NOT NULL,
                 func_id INTEGER NOT NULL,
                 usage INTEGER NOT NULL,
-                UNIQUE(bench_id, func_id),
-                FOREIGN KEY (func_id) REFERENCES functions(id),
-                FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
+                UNIQUE(func_id, bench_id)
             )";
     conn.execute(&func_usage_table, [])
         .expect("Issue during usage_functions table creation");
@@ -128,9 +124,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 bench_id INTEGER NOT NULL,
                 line_id INTEGER NOT NULL,
                 usage INTEGER NOT NULL,
-                UNIQUE(bench_id, line_id),
-                FOREIGN KEY (line_id) REFERENCES lines(id),
-                FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
+                UNIQUE(line_id, bench_id)
             )";
     conn.execute(&line_usage_table, [])
         .expect("Issue during usage_lines table creation");
@@ -141,9 +135,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
                 bench_id INTEGER NOT NULL,
                 branch_id INTEGER NOT NULL,
                 usage INTEGER NOT NULL,
-                UNIQUE(bench_id, branch_id),
-                FOREIGN KEY (branch_id) REFERENCES branches(id),
-                FOREIGN KEY (bench_id) REFERENCES benchmarks(id)
+                UNIQUE(branch_id, bench_id)
             )";
     conn.execute(&branch_usage_table, [])
         .expect("Issue during usage_branches table creation");

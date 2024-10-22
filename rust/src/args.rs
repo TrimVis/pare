@@ -1,7 +1,10 @@
 use clap::Parser;
 use mktemp::Temp;
 use once_cell::sync::Lazy;
-use std::path::PathBuf;
+use std::{
+    fs::create_dir,
+    path::{Path, PathBuf},
+};
 
 use crate::info;
 
@@ -10,7 +13,11 @@ pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
     let mut args = CliArgs::parse();
     // Initialize `tmp_dir` if it hasn't been explicitly provided
     if args.tmp_dir.is_none() {
-        args.tmp_dir = Some(Temp::new_dir().unwrap().to_path_buf());
+        let tmp_base_dir = Path::new("/tmp/coverage_reports");
+        if !tmp_base_dir.exists() {
+            create_dir(tmp_base_dir).expect("Could not create tmp dir");
+        }
+        args.tmp_dir = Some(Temp::new_dir_in(tmp_base_dir).unwrap().to_path_buf());
         info!(
             "Using temp directory '{}' for intermediate gcov results",
             args.tmp_dir.as_ref().unwrap().display().to_string()

@@ -150,24 +150,27 @@ impl<'a> Db<'a> {
             }
         }
 
-        // 2. Ensure all functions exist in DB & retrieve their ids
+        // 2. Ensure all (used) functions exist in DB & retrieve their ids
         {
             let mut conn = self.conn.borrow_mut();
             let func_tx = conn.transaction()?;
             {
                 let mut func_stmt = func_tx.prepare(
-                    "INSERT INTO \"functions\" (
+                    "INSERT OR IGNORE INTO \"functions\" (
                 source_id,
                 name,
                 start_line,
                 start_col,
                 end_line,
                 end_col
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT DO NOTHING",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 )?;
                 for (file, (funcs, _)) in &run_result {
                     let sid = srcid_file_map.get(file).unwrap();
                     for func in funcs {
+                        if func.usage == 0 {
+                            continue;
+                        }
                         func_stmt.execute(params![
                             sid.to_string(),
                             func.name.to_string(),
@@ -217,6 +220,9 @@ impl<'a> Db<'a> {
                 for (file, (funcs, _)) in &run_result {
                     let sid = srcid_file_map.get(file).unwrap();
                     for func in funcs {
+                        if func.usage == 0 {
+                            continue;
+                        }
                         let funcid = id_fname_map.get(&(*sid, func.name.to_string())).unwrap();
 
                         funcusage_stmt.execute(params![bench_id, *funcid, func.usage])?;
@@ -236,11 +242,14 @@ impl<'a> Db<'a> {
                     "INSERT INTO \"lines\" (
                 source_id,
                 line_no
-            ) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+            ) VALUES (?1, ?2) ON CONFLICT (source_id, line_no) DO NOTHING",
                 )?;
                 for (file, (_, lines)) in &run_result {
                     let sid = srcid_file_map.get(file).unwrap();
                     for line in lines {
+                        if line.usage == 0 {
+                            continue;
+                        }
                         line_stmt.execute(params![*sid, line.line_no])?;
                     }
                 }
@@ -281,6 +290,9 @@ impl<'a> Db<'a> {
                 for (file, (_, lines)) in &run_result {
                     let sid = srcid_file_map.get(file).unwrap();
                     for line in lines {
+                        if line.usage == 0 {
+                            continue;
+                        }
                         let lineid = id_line_map.get(&(*sid, line.line_no.into())).unwrap();
                         lineusage_stmt.execute(params![bench_id, *lineid, line.usage])?;
                     }
