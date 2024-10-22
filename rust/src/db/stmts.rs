@@ -16,7 +16,8 @@ pub(super) struct Stmts<'a> {
     pub(super) insert_function_usage: Rc<RefCell<Statement<'a>>>,
 }
 impl<'a> Stmts<'a> {
-    pub(super) fn new(conn: Rc<Connection>) -> ResultT<Self> {
+    pub(super) fn new(conn: Rc<RefCell<Connection>>) -> ResultT<Self> {
+        let conn = conn.borrow_mut();
         // TODO: Update expect messages
         let insert_cvc5result = Rc::new(RefCell::new(
             conn.prepare(

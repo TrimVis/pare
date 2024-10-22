@@ -95,6 +95,7 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     Ok(result)
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct GcovJson {
     current_working_directory: String,
@@ -111,6 +112,7 @@ struct FileElement {
     lines: Vec<LineElement>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct FunctionElement {
     blocks: u32,
@@ -124,6 +126,7 @@ struct FunctionElement {
     start_line: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct LineElement {
     line_number: u32,
@@ -136,6 +139,7 @@ struct LineElement {
 }
 
 // TODO: Also aggregate information about branches
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct BranchElement {
     count: u32,
@@ -145,6 +149,7 @@ struct BranchElement {
     r#throw: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct CallElement {
     destination_block_id: u32,
@@ -152,6 +157,7 @@ struct CallElement {
     source_block_id: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct ConditionElement {
     count: u32,

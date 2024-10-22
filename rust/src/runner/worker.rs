@@ -32,7 +32,7 @@ impl Worker {
                 match job {
                     Ok(RunnerQueueMessage::Cvc5Cmd(benchmark)) => {
                         info!(
-                            "Worker {} got a cvc5 job (bench_id: {}); executing.",
+                            "[Worker {}] Received cvc5 job (bench_id: {})",
                             id, benchmark.id
                         );
                         let result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
@@ -44,7 +44,7 @@ impl Worker {
                     }
                     Ok(RunnerQueueMessage::GcovCmd(benchmark)) => {
                         info!(
-                            "Worker {} got a gcov job (bench_id: {}); executing.",
+                            "[Worker {}] Received GCOV job (bench_id: {})",
                             id, benchmark.id
                         );
 
@@ -56,7 +56,7 @@ impl Worker {
                             .unwrap();
                     }
                     Ok(RunnerQueueMessage::Stop) => {
-                        info!("Worker {} received stop signal; shutting down.", id);
+                        warn!("[Worker {}] Received stop signal.", id);
                         break;
                     }
                     Err(_) => {
@@ -76,22 +76,17 @@ impl Worker {
 
     pub(super) fn new_processing(receiver: mpsc::Receiver<ProcessingQueueMessage>) -> Worker {
         let thread = thread::spawn(move || {
+            let mut db = Db::connect().expect("Could not connect to the DB in worker");
             loop {
-                let mut db = Db::connect().expect("Could not connect to the DB in worker");
-
                 let job = receiver.recv();
                 match job {
                     Ok(ProcessingQueueMessage::Cvc5Start(benchmark_id)) => {
-                        info!(
-                            "Processing Worker got a cvc5 start event. (bench_id: {})",
-                            benchmark_id
-                        );
                         db.update_benchmark_status(benchmark_id, Status::Running)
                             .expect("Could not update benchmark status");
                     }
                     Ok(ProcessingQueueMessage::Cvc5Res(benchmark, result)) => {
                         info!(
-                            "Processing Worker got a cvc5 result. (bench_id: {})",
+                            "[DB Writer] Received cvc5 result (bench_id: {})",
                             benchmark.id
                         );
                         db.add_cvc5_run_result(result).unwrap();
@@ -99,16 +94,12 @@ impl Worker {
                             .unwrap();
                     }
                     Ok(ProcessingQueueMessage::GcovStart(benchmark_id)) => {
-                        info!(
-                            "Processing Worker got a gcov start event. (bench_id: {})",
-                            benchmark_id
-                        );
                         db.update_benchmark_status(benchmark_id, Status::Processing)
                             .expect("Could not update benchmark status");
                     }
                     Ok(ProcessingQueueMessage::GcovRes(benchmark, result)) => {
                         info!(
-                            "Processing Worker got a gcov result. (bench_id: {})",
+                            "[DB Writer] Received GCOV result (bench_id: {})",
                             benchmark.id
                         );
                         db.add_gcov_measurement(benchmark.id, result).unwrap();
@@ -116,11 +107,11 @@ impl Worker {
                             .expect("Could not update bench status");
                     }
                     Ok(ProcessingQueueMessage::Stop) => {
-                        info!("Processing Worker received stop signal; shutting down.");
+                        warn!("[DB Writer] received stop signal; shutting down.");
                         break;
                     }
                     Err(_) => {
-                        error!("Processing Worker disconnected; shutting down.");
+                        warn!("[DB Writer] Disconnected; shutting down.");
                         break;
                     }
                 }

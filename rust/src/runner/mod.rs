@@ -71,6 +71,8 @@ impl Runner {
     }
 
     pub fn enqueue_gcov(&mut self, benchmark: Benchmark) {
+        // Safety guard, if DB worker falls behind it happens that
+        // we try to enqueue entries multiple times
         if !self.gcov_enqueued.contains(&benchmark.id) {
             self.gcov_enqueued.insert(benchmark.id);
             self.processing_queue
@@ -81,16 +83,12 @@ impl Runner {
             self.runner_queue
                 .send(RunnerQueueMessage::GcovCmd(benchmark))
                 .unwrap();
-        } else {
-            error!(
-                "Reached theoretically unreachable code (enqueue_gcov) - bech_id: {}",
-                benchmark.id
-            );
         }
     }
 
     pub fn enqueue_cvc5(&mut self, benchmark: Benchmark) {
-        // Safety guard, not necessary
+        // Safety guard, if DB worker falls behind it happens that
+        // we try to enqueue entries multiple times
         if !self.cvc5_enqueued.contains(&benchmark.id) {
             self.cvc5_enqueued.insert(benchmark.id);
             self.processing_queue
@@ -101,11 +99,6 @@ impl Runner {
             self.runner_queue
                 .send(RunnerQueueMessage::Cvc5Cmd(benchmark))
                 .unwrap();
-        } else {
-            error!(
-                "Reached theoretically unreachable code (enqueue_cvc5) - bech_id: {}",
-                benchmark.id
-            );
         }
     }
 
