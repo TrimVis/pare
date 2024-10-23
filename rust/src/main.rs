@@ -8,6 +8,7 @@ use crate::types::ResultT;
 use fern::Dispatch;
 pub use log::{error, info, warn};
 use std::fs::{create_dir_all, File};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -43,7 +44,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Db Setup
     if ARGS.result_db.to_str().unwrap() != ":memory:" {
         assert!(!ARGS.result_db.exists(), "DB file already exists.");
-        let out_dir = ARGS.result_db.parent().unwrap().canonicalize().unwrap();
+        let out_dir = ARGS.result_db.parent().unwrap();
+        println!("{:?}", out_dir);
+        let out_dir = {
+            // Just to make sure we can canonicalize it at all
+            if out_dir.is_relative() {
+                Path::new("./").join(out_dir).canonicalize().unwrap()
+            } else {
+                out_dir.canonicalize().unwrap()
+            }
+        };
+        println!("{:?}", out_dir);
         create_dir_all(out_dir).unwrap();
     }
 
@@ -73,10 +84,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             runner.enqueue_cvc5(r);
         }
 
-        thread::sleep(Duration::from_secs(10));
+        // TODO: This isn't really optimal with the sleep, but good enough
+        thread::sleep(Duration::from_secs(5));
         remaining_entries = db.remaining_count()?;
     }
 
+    // Tell runners to stop after queue has been worked of
+    runner.stop();
     // Wait for all jobs to finish
     runner.join();
 

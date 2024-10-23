@@ -84,7 +84,10 @@ impl<'a> Db<'a> {
                 Ok(Benchmark {
                     id: row.get(0)?,
                     path: PathBuf::from(path),
-                    prefix: PathBuf::from(prefix),
+                    prefix: match prefix.as_str() {
+                        "" => None,
+                        _ => Some(PathBuf::from(prefix)),
+                    },
                 })
             })
             .expect("Issue during benchmark status update!");
@@ -98,11 +101,21 @@ impl<'a> Db<'a> {
 
     pub fn remaining_count(&mut self) -> ResultT<usize> {
         let mut stmt = self.stmts.count_benchstatus.borrow_mut();
-        let mut res = stmt.query(params![Status::Waiting as u8])?;
-        let row = res.next()?.unwrap();
-        let row_count: usize = row.get(0)?;
+        let row_count_done = {
+            let mut res = stmt.query(params![Status::Done as u8])?;
+            let row = res.next()?.unwrap();
+            let row_count: usize = row.get(0)?;
+            row_count
+        };
+        let mut stmt = self.stmts.count_benchstatus_total.borrow_mut();
+        let row_count_total = {
+            let mut res = stmt.query(params![])?;
+            let row = res.next()?.unwrap();
+            let row_count: usize = row.get(0)?;
+            row_count
+        };
 
-        Ok(row_count)
+        Ok(row_count_total - row_count_done)
     }
 
     pub fn add_cvc5_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {

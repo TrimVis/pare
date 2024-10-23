@@ -21,16 +21,23 @@ pub type GcovRes = HashMap<
 >;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
-    let prefix_dir = benchmark.prefix.display().to_string();
+    let prefix_dir = match benchmark.prefix.clone() {
+        None => ARGS.benchmark_dir.clone(),
+        Some(p) => p,
+    }
+    .display()
+    .to_string();
     let pattern = format!("{}/**/*.gcda", prefix_dir);
 
     let mut result: GcovRes = HashMap::new();
     for entry in glob(&pattern).expect("Failed to read glob pattern") {
         if let Ok(gcda_file) = entry {
-            let gcno_file_dst = gcda_file.to_str().unwrap();
-            let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
-            let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
-            symlink(&gcno_file_src, &gcno_file_dst).unwrap_or(());
+            if ARGS.individual_prefixes {
+                let gcno_file_dst = gcda_file.to_str().unwrap();
+                let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
+                let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
+                symlink(&gcno_file_src, &gcno_file_dst).unwrap_or(());
+            }
 
             let args = ["--json", "--stdout", gcda_file.to_str().unwrap()];
             let output = Command::new("gcov")

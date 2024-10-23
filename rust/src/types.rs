@@ -16,6 +16,7 @@ pub struct FilePosition {
     pub col: u32,
 }
 
+#[allow(dead_code)]
 pub struct Function {
     pub id: Option<usize>,
     pub source_id: Option<usize>,
@@ -24,17 +25,20 @@ pub struct Function {
     pub end: FilePosition,
 }
 
+#[allow(dead_code)]
 pub struct Line {
     pub id: Option<usize>,
     pub source_id: Option<usize>,
     pub line_no: u32,
 }
 
+#[allow(dead_code)]
 pub struct Source {
     pub id: Option<u64>,
     pub path: PathBuf,
 }
 
+#[allow(dead_code)]
 pub struct FuncBenchUsage {
     pub id: Option<usize>,
     pub bench_id: Option<usize>,
@@ -42,6 +46,7 @@ pub struct FuncBenchUsage {
     pub usage: u32,
 }
 
+#[allow(dead_code)]
 pub struct LineBenchUsage {
     pub id: Option<usize>,
     pub bench_id: Option<usize>,
@@ -49,11 +54,11 @@ pub struct LineBenchUsage {
     pub usage: u32,
 }
 
-// TODO: Switch ids everywhere to option
+#[derive(Debug)]
 pub struct Benchmark {
     pub id: u64,
     pub path: PathBuf,
-    pub prefix: PathBuf,
+    pub prefix: Option<PathBuf>,
 }
 
 pub struct BenchmarkRun {

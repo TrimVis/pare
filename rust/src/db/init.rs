@@ -1,4 +1,4 @@
-use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::types::Status;
 use crate::{ResultT, ARGS};
 
@@ -198,22 +198,27 @@ pub(super) fn populate_benchmarks(conn: &RefCell<Connection>) -> ResultT<()> {
 
     for entry in glob(&pattern).expect("Failed to read glob pattern") {
         if let Ok(file) = entry {
-            let mut hasher = Sha256::new();
-            hasher.update(file.to_string_lossy().as_bytes());
-            let hash = format!("{:x}", hasher.finalize());
+            let dfile = file.canonicalize().unwrap().display().to_string();
+            let prefix = if ARGS.individual_prefixes {
+                let mut hasher = Sha256::new();
+                hasher.update(file.to_string_lossy().as_bytes());
+                let hash = format!("{:x}", hasher.finalize());
 
-            let prefix = prefix_base.join(hash);
-            if !prefix.exists() {
-                fs::create_dir(&prefix).expect("Could not create prefix dir");
-            }
+                let prefix = prefix_base.join(hash);
+                if !prefix.exists() {
+                    fs::create_dir(&prefix).expect("Could not create prefix dir");
+                }
 
-            let file = file.canonicalize().unwrap().display().to_string();
-            let prefix = prefix.canonicalize().unwrap().display().to_string();
+                let prefix = prefix.canonicalize().unwrap().display().to_string();
+                prefix
+            } else {
+                "".to_string()
+            };
 
             // TODO: Instead of storing the full path only store the difference
             // due to file size reasons
 
-            stmt.execute(params![file, prefix])?;
+            stmt.execute(params![dfile, prefix])?;
         }
     }
 

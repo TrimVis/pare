@@ -9,6 +9,7 @@ pub(super) struct Stmts<'a> {
     pub(super) update_benchstatus: Rc<RefCell<Statement<'a>>>,
     pub(super) select_benchstatus: Rc<RefCell<Statement<'a>>>,
     pub(super) count_benchstatus: Rc<RefCell<Statement<'a>>>,
+    pub(super) count_benchstatus_total: Rc<RefCell<Statement<'a>>>,
 }
 impl<'a> Stmts<'a> {
     pub(super) fn new(conn: Rc<RefCell<Connection>>) -> ResultT<Self> {
@@ -47,6 +48,15 @@ impl<'a> Stmts<'a> {
             .expect("Issue during benchstatus select query preparation"),
         ));
 
+        let count_benchstatus_total = Rc::from(RefCell::new(
+            conn.prepare(
+                "SELECT COUNT(1)
+                FROM \"status_benchmarks\" AS s
+                JOIN \"benchmarks\" AS b ON b.id = s.bench_id",
+            )
+            .expect("Issue during benchstatus count query preparation"),
+        ));
+
         let count_benchstatus = Rc::from(RefCell::new(
             conn.prepare(
                 "SELECT COUNT(1)
@@ -63,6 +73,7 @@ impl<'a> Stmts<'a> {
             update_benchstatus: unsafe { std::mem::transmute(update_benchstatus) },
             select_benchstatus: unsafe { std::mem::transmute(select_benchstatus) },
             count_benchstatus: unsafe { std::mem::transmute(count_benchstatus) },
+            count_benchstatus_total: unsafe { std::mem::transmute(count_benchstatus_total) },
         })
         // Ok(Stmts {
         //     insert_cvc5result,
