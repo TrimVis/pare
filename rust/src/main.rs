@@ -45,7 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if ARGS.result_db.to_str().unwrap() != ":memory:" {
         assert!(!ARGS.result_db.exists(), "DB file already exists.");
         let out_dir = ARGS.result_db.parent().unwrap();
-        println!("{:?}", out_dir);
         let out_dir = {
             // Just to make sure we can canonicalize it at all
             if out_dir.is_relative() {
@@ -54,7 +53,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 out_dir.canonicalize().unwrap()
             }
         };
-        println!("{:?}", out_dir);
         create_dir_all(out_dir).unwrap();
     }
 

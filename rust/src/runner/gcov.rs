@@ -22,7 +22,7 @@ pub type GcovRes = HashMap<
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = match benchmark.prefix.clone() {
-        None => ARGS.benchmark_dir.clone(),
+        None => ARGS.build_dir.clone(),
         Some(p) => p,
     }
     .display()

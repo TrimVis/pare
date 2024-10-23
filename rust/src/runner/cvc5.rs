@@ -7,12 +7,12 @@ use std::process::Command;
 use std::time::Instant;
 
 pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<BenchmarkRun> {
-    let mut cmd = &mut Command::new(cvc5cmd);
+    let cmd = &mut Command::new(cvc5cmd);
     if let Some(prefix) = &benchmark.prefix {
-        cmd = cmd.env("GCOV_PREFIX", prefix.display().to_string());
+        cmd.env("GCOV_PREFIX", prefix.display().to_string());
     }
     // TODO: Use the argument and don't harcode this
-    cmd = cmd.args(&["--tlimit", "5000", &benchmark.path.display().to_string()]);
+    cmd.args(&["--tlimit", "5000", &benchmark.path.display().to_string()]);
 
     let start = Instant::now();
     let output = cmd.output().expect("Could not capture output of cvc5...");

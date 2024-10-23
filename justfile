@@ -28,8 +28,11 @@ build:
     mkdir -p "{{cvc5dir}}"
     if test ! -d "{{cvc5git}}"; then git clone --depth 1 "{{cvc5repo}}" "{{cvc5dir}}"; fi
 
-    cd {{cvc5dir}} && ./configure.sh debug --auto-download --coverage 
-    cd "{{cvc5dir}}/build" && make
+    cd {{cvc5dir}} && ./configure.sh debug --auto-download --coverage --poly --cocoa --gpl
+    cd "{{cvc5dir}}/build" && make -j $(nproc)
+
+coverage-reset:
+    cd "{{cvc5dir}}/build" && make coverage-reset
 
 setup:
     #!/usr/bin/env sh
