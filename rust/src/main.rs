@@ -66,7 +66,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while remaining_entries > 0 {
         // Early return in case of Ctrl+C
         if !running.load(Ordering::SeqCst) {
-            runner.stop();
             break;
         }
 
@@ -89,8 +88,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Tell runners to stop after queue has been worked of
     runner.stop();
-    // Wait for all jobs to finish
-    runner.join();
 
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());

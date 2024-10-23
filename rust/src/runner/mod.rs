@@ -103,17 +103,15 @@ impl Runner {
 
     pub fn stop(&mut self) {
         self.runner_queue.send(RunnerQueueMessage::Stop).unwrap();
+        for runner in &mut self.runner_workers {
+            runner.join();
+        }
+
+        self.processing_worker.join();
         self.processing_queue
             .lock()
             .unwrap()
             .send(ProcessingQueueMessage::Stop)
             .unwrap();
-    }
-
-    pub fn join(&mut self) {
-        for worker in &mut self.runner_workers {
-            worker.join()
-        }
-        self.processing_worker.join()
     }
 }

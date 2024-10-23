@@ -60,12 +60,12 @@ impl Worker {
                         break;
                     }
                     Err(_) => {
-                        error!("Worker {} disconnected; shutting down.", id);
+                        error!("[Worker {}] Disconnected; shutting down.", id);
                         break;
                     }
                 }
             }
-            warn!("Runner {} worker terminated.", id);
+            warn!("[Worker {}] Terminated.", id);
         });
 
         Worker {
@@ -116,7 +116,7 @@ impl Worker {
                     }
                 }
             }
-            warn!("Processing worker terminated.");
+            warn!("[DB Writer] Terminated.");
         });
 
         Worker {
