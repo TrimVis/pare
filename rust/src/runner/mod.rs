@@ -2,7 +2,6 @@ mod cvc5;
 mod gcov;
 mod worker;
 pub use gcov::GcovRes;
-use log::error;
 
 use crate::types::{Benchmark, BenchmarkRun};
 use crate::ARGS;

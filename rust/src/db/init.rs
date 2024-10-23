@@ -1,3 +1,4 @@
+use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::types::Status;
 use crate::{ResultT, ARGS};
 
@@ -6,7 +7,6 @@ use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fs;
-use std::path::Path;
 
 pub(super) fn prepare(conn: &RefCell<Connection>) -> ResultT<()> {
     let conn = conn.borrow_mut();
@@ -61,40 +61,6 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
     conn.execute(&source_table, [])
         .expect("Issue during sources table creation");
 
-    // Store information about functions
-    let func_table = "CREATE TABLE IF NOT EXISTS \"functions\" (
-                id INTEGER PRIMARY KEY,
-                source_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                start_line INTEGER NOT NULL,
-                start_col INTEGER NOT NULL,
-                end_line INTEGER NOT NULL,
-                end_col INTEGER NOT NULL,
-                UNIQUE(source_id, name)
-            )";
-    conn.execute(&func_table, [])
-        .expect("Issue during functions table creation");
-
-    // Store information about branches
-    let branch_table = "CREATE TABLE IF NOT EXISTS \"branches\" (
-                id INTEGER PRIMARY KEY,
-                source_id INTEGER NOT NULL,
-                branch_no INTEGER NOT NULL,
-                UNIQUE(source_id, branch_no)
-            )";
-    conn.execute(&branch_table, [])
-        .expect("Issue during branches table creation");
-
-    // Store information about lines
-    let line_table = "CREATE TABLE IF NOT EXISTS \"lines\" (
-                id INTEGER PRIMARY KEY,
-                source_id INTEGER NOT NULL,
-                line_no INTEGER NOT NULL,
-                UNIQUE(source_id, line_no)
-            )";
-    conn.execute(&line_table, [])
-        .expect("Issue during lines table creation");
-
     // Stores the output of benchmark runs and other metadata
     let results_table = "CREATE TABLE IF NOT EXISTS \"result_benchmarks\" (
                 id INTEGER PRIMARY KEY,
@@ -107,38 +73,85 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
     conn.execute(&results_table, [])
         .expect("Issue during result_benchmarks table creation");
 
-    // Stores the function usage
-    let func_usage_table = "CREATE TABLE IF NOT EXISTS \"usage_functions\" (
+    if TRACK_FUNCS.clone() {
+        // Store information about functions
+        let func_table = "CREATE TABLE IF NOT EXISTS \"functions\" (
+                id INTEGER PRIMARY KEY,
+                source_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                start_col INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                end_col INTEGER NOT NULL,
+                UNIQUE(source_id, name)
+            )";
+        conn.execute(&func_table, [])
+            .expect("Issue during functions table creation");
+        // Stores the function usage
+        let func_usage_table = format!(
+            "CREATE TABLE IF NOT EXISTS \"usage_functions\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 func_id INTEGER NOT NULL,
-                usage INTEGER NOT NULL,
+                {} INTEGER NOT NULL,
                 UNIQUE(func_id, bench_id)
-            )";
-    conn.execute(&func_usage_table, [])
-        .expect("Issue during usage_functions table creation");
+            )",
+            DB_USAGE_NAME.clone()
+        );
+        conn.execute(&func_usage_table, [])
+            .expect("Issue during usage_functions table creation");
+    }
 
-    // Stores the line usage
-    let line_usage_table = "CREATE TABLE IF NOT EXISTS \"usage_lines\" (
+    if TRACK_LINES.clone() {
+        // Store information about lines
+        let line_table = "CREATE TABLE IF NOT EXISTS \"lines\" (
+                id INTEGER PRIMARY KEY,
+                source_id INTEGER NOT NULL,
+                line_no INTEGER NOT NULL,
+                UNIQUE(source_id, line_no)
+            )";
+        conn.execute(&line_table, [])
+            .expect("Issue during lines table creation");
+
+        // Stores the line usage
+        let line_usage_table = format!(
+            "CREATE TABLE IF NOT EXISTS \"usage_lines\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 line_id INTEGER NOT NULL,
-                usage INTEGER NOT NULL,
+                {} INTEGER NOT NULL,
                 UNIQUE(line_id, bench_id)
-            )";
-    conn.execute(&line_usage_table, [])
-        .expect("Issue during usage_lines table creation");
+            )",
+            DB_USAGE_NAME.clone()
+        );
+        conn.execute(&line_usage_table, [])
+            .expect("Issue during usage_lines table creation");
+    }
 
-    // Stores the branch usage
-    let branch_usage_table = "CREATE TABLE IF NOT EXISTS \"usage_branches\" (
+    if TRACK_BRANCHES.clone() {
+        // Store information about branches
+        let branch_table = "CREATE TABLE IF NOT EXISTS \"branches\" (
+                id INTEGER PRIMARY KEY,
+                source_id INTEGER NOT NULL,
+                branch_no INTEGER NOT NULL,
+                UNIQUE(source_id, branch_no)
+            )";
+        conn.execute(&branch_table, [])
+            .expect("Issue during branches table creation");
+        // Stores the branch usage
+        let branch_usage_table = format!(
+            "CREATE TABLE IF NOT EXISTS \"usage_branches\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 branch_id INTEGER NOT NULL,
-                usage INTEGER NOT NULL,
+                {} INTEGER NOT NULL,
                 UNIQUE(branch_id, bench_id)
-            )";
-    conn.execute(&branch_usage_table, [])
-        .expect("Issue during usage_branches table creation");
+            )",
+            DB_USAGE_NAME.clone()
+        );
+        conn.execute(&branch_usage_table, [])
+            .expect("Issue during usage_branches table creation");
+    }
 
     Ok(())
 }
@@ -150,7 +163,13 @@ pub(super) fn populate_config(conn: &RefCell<Connection>) -> ResultT<()> {
         &c_insert,
         params!["individual_gcov_prefixes", ARGS.individual_prefixes],
     )?;
-    conn.execute(&c_insert, params!["sample_size", ARGS.sample_size])?;
+
+    for (i, c) in ARGS.coverage_kinds.iter().enumerate() {
+        let k = format!("coverage_kind_{}", i);
+        conn.execute(&c_insert, params![k, c.to_string()])?;
+    }
+
+    conn.execute(&c_insert, params!["coverage_mode", ARGS.mode.to_string()])?;
 
     conn.execute(&c_insert, params!["job_size", ARGS.job_size])?;
 

@@ -7,7 +7,7 @@ use crate::types::ResultT;
 
 use fern::Dispatch;
 pub use log::{error, info, warn};
-use std::fs::File;
+use std::fs::{create_dir_all, File};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -41,18 +41,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .apply()?;
 
     // Db Setup
-    // FIXME: These checks prevent the use of in-memory DB via ":memory:" as arg
-    // assert!(!ARGS.result_db.exists(), "DB file already exists.");
-    // let out_dir = ARGS.result_db.parent().unwrap().canonicalize().unwrap();
-    // create_dir_all(out_dir).unwrap();
+    if ARGS.result_db.to_str().unwrap() != ":memory:" {
+        assert!(!ARGS.result_db.exists(), "DB file already exists.");
+        let out_dir = ARGS.result_db.parent().unwrap().canonicalize().unwrap();
+        create_dir_all(out_dir).unwrap();
+    }
 
     let mut db = db::Db::new()?;
     db.init()?;
-
-    info!(
-        "Sample Size: {} \tArgs: {}",
-        ARGS.sample_size, ARGS.cvc5_args,
-    );
 
     // Runner Setup
     let mut runner = runner::Runner::new();

@@ -77,3 +77,6 @@ pub struct GcovLineResult {
     pub line_no: u32,
     pub usage: u32,
 }
+
+#[derive(Clone)]
+pub struct GcovBranchResult {}

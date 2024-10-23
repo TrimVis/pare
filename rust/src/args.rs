@@ -1,6 +1,7 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use mktemp::Temp;
 use once_cell::sync::Lazy;
+use std::fmt;
 use std::{
     fs::create_dir,
     path::{Path, PathBuf},
@@ -26,6 +27,61 @@ pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
     args
 });
 
+pub static TRACK_FUNCS: Lazy<bool> =
+    Lazy::new(|| ARGS.coverage_kinds.contains(&CoverageKind::Functions));
+pub static TRACK_LINES: Lazy<bool> =
+    Lazy::new(|| ARGS.coverage_kinds.contains(&CoverageKind::Lines));
+pub static TRACK_BRANCHES: Lazy<bool> =
+    Lazy::new(|| ARGS.coverage_kinds.contains(&CoverageKind::Branches));
+
+pub static DB_USAGE_NAME: Lazy<String> = Lazy::new(|| {
+    if ARGS.mode == CoverageMode::Full {
+        "execution_count".to_string()
+    } else {
+        "benchmark_count".to_string()
+    }
+});
+
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
+pub enum CoverageMode {
+    Aggregated,
+    Full,
+}
+
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
+pub enum CoverageKind {
+    Functions,
+    Branches,
+    Lines,
+}
+
+impl fmt::Display for CoverageMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                CoverageMode::Full => "full",
+                CoverageMode::Aggregated => "aggregated",
+            }
+        )
+    }
+}
+
+impl fmt::Display for CoverageKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                CoverageKind::Functions => "functions",
+                CoverageKind::Lines => "lines",
+                CoverageKind::Branches => "branches",
+            }
+        )
+    }
+}
+
 /// Benchmark coverage script.
 #[derive(Parser, Debug)]
 #[command(name = "Benchmark coverage script")]
@@ -38,9 +94,18 @@ pub struct CliArgs {
     #[arg(short = 'a', long, default_value = "--tlimit 2000")]
     pub cvc5_args: String,
 
-    /// Sample size ("all", or comma-separated values)
-    #[arg(short = 'n', long, default_value = "all")]
-    pub sample_size: String,
+    /// Coverage Mode, determines how much data is stored into the DB
+    #[arg(short = 'm', long, default_value_t = CoverageMode::Aggregated)]
+    pub mode: CoverageMode,
+
+    /// Kinds of code elements for which usage data will be collected
+    #[arg(
+        short = 'k',
+        long,
+        default_value = "functions,branches,lines",
+        value_delimiter = ','
+    )]
+    pub coverage_kinds: Vec<CoverageKind>,
 
     /// Use individual GCOV prefixes for each run
     #[arg(short, long, action = clap::ArgAction::SetTrue)]

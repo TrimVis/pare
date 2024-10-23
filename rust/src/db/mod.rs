@@ -1,5 +1,6 @@
 mod init;
 mod stmts;
+use crate::args::{DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::GcovRes;
 use crate::types::{Benchmark, BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
@@ -151,12 +152,13 @@ impl<'a> Db<'a> {
         }
 
         // 2. Ensure all (used) functions exist in DB & retrieve their ids
-        {
-            let mut conn = self.conn.borrow_mut();
-            let func_tx = conn.transaction()?;
+        if TRACK_FUNCS.clone() {
             {
-                let mut func_stmt = func_tx.prepare(
-                    "INSERT OR IGNORE INTO \"functions\" (
+                let mut conn = self.conn.borrow_mut();
+                let func_tx = conn.transaction()?;
+                {
+                    let mut func_stmt = func_tx.prepare(
+                        "INSERT OR IGNORE INTO \"functions\" (
                 source_id,
                 name,
                 start_line,
@@ -164,141 +166,153 @@ impl<'a> Db<'a> {
                 end_line,
                 end_col
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                )?;
-                for (file, (funcs, _)) in &run_result {
-                    let sid = srcid_file_map.get(file).unwrap();
-                    for func in funcs {
-                        if func.usage == 0 {
-                            continue;
+                    )?;
+                    for (file, (funcs, _, _)) in &run_result {
+                        let sid = srcid_file_map.get(file).unwrap();
+                        for func in funcs {
+                            if func.usage == 0 {
+                                continue;
+                            }
+                            func_stmt.execute(params![
+                                sid.to_string(),
+                                func.name.to_string(),
+                                func.start.line.to_string(),
+                                func.start.col.to_string(),
+                                func.end.line.to_string(),
+                                func.end.col.to_string(),
+                            ])?;
                         }
-                        func_stmt.execute(params![
-                            sid.to_string(),
-                            func.name.to_string(),
-                            func.start.line.to_string(),
-                            func.start.col.to_string(),
-                            func.end.line.to_string(),
-                            func.end.col.to_string(),
-                        ])?;
                     }
                 }
+                func_tx.commit()?;
             }
-            func_tx.commit()?;
-        }
 
-        let mut id_fname_map: HashMap<(u64, String), u64>;
-        {
-            let conn = self.conn.borrow_mut();
-            let mut stmt = conn.prepare("SELECT id, source_id, name FROM \"functions\"")?;
-            let rows = stmt.query_map(params![], |row| {
-                let id: u64 = row.get(0)?;
-                let source_id: u64 = row.get(1)?;
-                let name: String = row.get(2)?;
-                Ok(((source_id, name), id))
-            })?;
-            id_fname_map = HashMap::with_capacity(rows.size_hint().0);
-            for row in rows {
-                let (key, value) = row?;
-                id_fname_map.insert(key, value);
-            }
-        }
-
-        // 3. Insert all function usage data into the DB
-        {
-            let mut conn = self.conn.borrow_mut();
-            let funcusage_tx = conn.transaction()?;
+            let mut id_fname_map: HashMap<(u64, String), u64>;
             {
-                let mut funcusage_stmt = funcusage_tx.prepare(
-                    "INSERT INTO \"usage_functions\" (
+                let conn = self.conn.borrow_mut();
+                let mut stmt = conn.prepare("SELECT id, source_id, name FROM \"functions\"")?;
+                let rows = stmt.query_map(params![], |row| {
+                    let id: u64 = row.get(0)?;
+                    let source_id: u64 = row.get(1)?;
+                    let name: String = row.get(2)?;
+                    Ok(((source_id, name), id))
+                })?;
+                id_fname_map = HashMap::with_capacity(rows.size_hint().0);
+                for row in rows {
+                    let (key, value) = row?;
+                    id_fname_map.insert(key, value);
+                }
+            }
+
+            // 3. Insert all function usage data into the DB
+            {
+                let mut conn = self.conn.borrow_mut();
+                let funcusage_tx = conn.transaction()?;
+                {
+                    let funcusage_query = format!(
+                        "INSERT INTO \"usage_functions\" (
                         bench_id,
                         func_id,
-                        usage
+                        {0}
                     ) VALUES (?1, ?2, ?3)
                     ON CONFLICT (bench_id, func_id) DO 
-                    UPDATE SET usage = usage + excluded.usage
+                    UPDATE SET {0} = {0} + excluded.{0}
                     ",
-                )?;
-                for (file, (funcs, _)) in &run_result {
-                    let sid = srcid_file_map.get(file).unwrap();
-                    for func in funcs {
-                        if func.usage == 0 {
-                            continue;
-                        }
-                        let funcid = id_fname_map.get(&(*sid, func.name.to_string())).unwrap();
+                        DB_USAGE_NAME.clone()
+                    );
+                    let mut funcusage_stmt = funcusage_tx.prepare(&funcusage_query)?;
+                    for (file, (funcs, _, _)) in &run_result {
+                        let sid = srcid_file_map.get(file).unwrap();
+                        for func in funcs {
+                            if func.usage == 0 {
+                                continue;
+                            }
+                            let funcid = id_fname_map.get(&(*sid, func.name.to_string())).unwrap();
 
-                        funcusage_stmt.execute(params![bench_id, *funcid, func.usage])?;
+                            funcusage_stmt.execute(params![bench_id, *funcid, func.usage])?;
+                        }
                     }
                 }
-            }
 
-            funcusage_tx.commit()?;
+                funcusage_tx.commit()?;
+            }
         }
 
         // 4. Ensure all lines exist in DB & retrieve their ids
-        {
-            let mut conn = self.conn.borrow_mut();
-            let line_tx = conn.transaction()?;
+        if TRACK_LINES.clone() {
             {
-                let mut line_stmt = line_tx.prepare(
-                    "INSERT INTO \"lines\" (
-                source_id,
-                line_no
-            ) VALUES (?1, ?2) ON CONFLICT (source_id, line_no) DO NOTHING",
-                )?;
-                for (file, (_, lines)) in &run_result {
-                    let sid = srcid_file_map.get(file).unwrap();
-                    for line in lines {
-                        if line.usage == 0 {
-                            continue;
+                let mut conn = self.conn.borrow_mut();
+                let line_tx = conn.transaction()?;
+                {
+                    let mut line_stmt = line_tx.prepare(
+                        "INSERT INTO \"lines\" (
+                            source_id,
+                            line_no
+                        ) VALUES (?1, ?2) ON CONFLICT (source_id, line_no) DO NOTHING",
+                    )?;
+                    for (file, (_, lines, _)) in &run_result {
+                        let sid = srcid_file_map.get(file).unwrap();
+                        for line in lines {
+                            if line.usage == 0 {
+                                continue;
+                            }
+                            line_stmt.execute(params![*sid, line.line_no])?;
                         }
-                        line_stmt.execute(params![*sid, line.line_no])?;
                     }
                 }
+                line_tx.commit()?;
             }
-            line_tx.commit()?;
+
+            let mut id_line_map: HashMap<(u64, u64), u64>;
+            {
+                let conn = self.conn.borrow();
+                let mut stmt = conn.prepare("SELECT id, source_id, line_no FROM \"lines\"")?;
+                let rows = stmt.query_map(params![], |row| {
+                    let id: u64 = row.get(0)?;
+                    let source_id: u64 = row.get(1)?;
+                    let line_no: u64 = row.get(2)?;
+                    Ok(((source_id, line_no), id))
+                })?;
+                id_line_map = HashMap::with_capacity(rows.size_hint().0);
+                for row in rows {
+                    let (key, value) = row?;
+                    id_line_map.insert(key, value);
+                }
+            }
+            // 5. Insert all line usage data into the DB
+            {
+                let mut conn = self.conn.borrow_mut();
+                let lineusage_tx = conn.transaction()?;
+                {
+                    let lineusage_query = format!(
+                        "INSERT INTO \"usage_lines\" (
+                            bench_id,
+                            line_id,
+                            {0}
+                        ) VALUES (?1, ?2, ?3)
+                        ON CONFLICT (bench_id, line_id) DO 
+                        UPDATE SET {0} = {0} + excluded.{0}",
+                        DB_USAGE_NAME.clone()
+                    );
+                    let mut lineusage_stmt = lineusage_tx.prepare(&lineusage_query)?;
+                    for (file, (_, lines, _)) in &run_result {
+                        let sid = srcid_file_map.get(file).unwrap();
+                        for line in lines {
+                            if line.usage == 0 {
+                                continue;
+                            }
+                            let lineid = id_line_map.get(&(*sid, line.line_no.into())).unwrap();
+                            lineusage_stmt.execute(params![bench_id, *lineid, line.usage])?;
+                        }
+                    }
+                }
+                lineusage_tx.commit()?;
+            }
         }
 
-        let mut id_line_map: HashMap<(u64, u64), u64>;
-        {
-            let conn = self.conn.borrow();
-            let mut stmt = conn.prepare("SELECT id, source_id, line_no FROM \"lines\"")?;
-            let rows = stmt.query_map(params![], |row| {
-                let id: u64 = row.get(0)?;
-                let source_id: u64 = row.get(1)?;
-                let line_no: u64 = row.get(2)?;
-                Ok(((source_id, line_no), id))
-            })?;
-            id_line_map = HashMap::with_capacity(rows.size_hint().0);
-            for row in rows {
-                let (key, value) = row?;
-                id_line_map.insert(key, value);
-            }
-        }
-        // 5. Insert all line usage data into the DB
-        {
-            let mut conn = self.conn.borrow_mut();
-            let lineusage_tx = conn.transaction()?;
-            {
-                let mut lineusage_stmt = lineusage_tx.prepare(
-                    "INSERT INTO \"usage_lines\" (
-                        bench_id,
-                        line_id,
-                        usage
-                    ) VALUES (?1, ?2, ?3)
-                    ON CONFLICT (bench_id, line_id) DO 
-                    UPDATE SET usage = usage + excluded.usage",
-                )?;
-                for (file, (_, lines)) in &run_result {
-                    let sid = srcid_file_map.get(file).unwrap();
-                    for line in lines {
-                        if line.usage == 0 {
-                            continue;
-                        }
-                        let lineid = id_line_map.get(&(*sid, line.line_no.into())).unwrap();
-                        lineusage_stmt.execute(params![bench_id, *lineid, line.usage])?;
-                    }
-                }
-            }
-            lineusage_tx.commit()?;
+        if TRACK_BRANCHES.clone() {
+            // TODO: Add support for branch tracking
+            unimplemented!("Branch tracking not yet supported")
         }
 
         Ok(())

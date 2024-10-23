@@ -1,5 +1,7 @@
-use crate::args::ARGS;
-use crate::types::{Benchmark, FilePosition, GcovFuncResult, GcovLineResult, ResultT};
+use crate::args::{CoverageMode, ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::types::{
+    Benchmark, FilePosition, GcovBranchResult, GcovFuncResult, GcovLineResult, ResultT,
+};
 
 use glob::glob;
 use log::error;
@@ -9,7 +11,14 @@ use std::collections::HashMap;
 use std::os::unix::fs::symlink;
 use std::process::Command;
 
-pub type GcovRes = HashMap<String, (Vec<GcovFuncResult>, Vec<GcovLineResult>)>;
+pub type GcovRes = HashMap<
+    String,
+    (
+        Vec<GcovFuncResult>,
+        Vec<GcovLineResult>,
+        Vec<GcovBranchResult>,
+    ),
+>;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = benchmark.prefix.display().to_string();
@@ -46,9 +55,16 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                 if !result.contains_key(key) {
                     result.insert(key.clone(), value.clone());
                 } else {
-                    let (funcs, lines) = result.get_mut(key).unwrap();
-                    funcs.append(&mut value.0);
-                    lines.append(&mut value.1);
+                    let (funcs, lines, branches) = result.get_mut(key).unwrap();
+                    if TRACK_FUNCS.clone() {
+                        funcs.append(&mut value.0);
+                    }
+                    if TRACK_LINES.clone() {
+                        lines.append(&mut value.1);
+                    }
+                    if TRACK_BRANCHES.clone() {
+                        branches.append(&mut value.2)
+                    }
                 }
             }
         }
@@ -66,30 +82,50 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
             continue;
         }
         let mut funcs: Vec<GcovFuncResult> = vec![];
-        for function in &file.functions {
-            funcs.push(GcovFuncResult {
-                name: function.demangled_name.clone(),
-                start: FilePosition {
-                    line: function.start_line,
-                    col: function.start_column,
-                },
-                end: FilePosition {
-                    line: function.end_line,
-                    col: function.end_column,
-                },
-                usage: function.execution_count,
-            });
+        if TRACK_FUNCS.clone() {
+            for function in &file.functions {
+                let usage = if ARGS.mode == CoverageMode::Full {
+                    function.execution_count
+                } else {
+                    (function.execution_count > 0) as u32
+                };
+                funcs.push(GcovFuncResult {
+                    name: function.demangled_name.clone(),
+                    start: FilePosition {
+                        line: function.start_line,
+                        col: function.start_column,
+                    },
+                    end: FilePosition {
+                        line: function.end_line,
+                        col: function.end_column,
+                    },
+                    usage,
+                });
+            }
         }
 
         let mut lines: Vec<GcovLineResult> = vec![];
-        for line in &file.lines {
-            lines.push(GcovLineResult {
-                line_no: line.line_number,
-                usage: line.count,
-            });
+        if TRACK_LINES.clone() {
+            for line in &file.lines {
+                let usage = if ARGS.mode == CoverageMode::Full {
+                    line.count
+                } else {
+                    (line.count > 0) as u32
+                };
+                lines.push(GcovLineResult {
+                    line_no: line.line_number,
+                    usage,
+                });
+            }
         }
 
-        result.insert(file.file.clone(), (funcs, lines));
+        let branches: Vec<GcovBranchResult> = vec![];
+        if TRACK_BRANCHES.clone() {
+            // TODO: Add support for branch tracking
+            unimplemented!("Branch tracking not yet supported")
+        }
+
+        result.insert(file.file.clone(), (funcs, lines, branches));
     }
 
     Ok(result)
@@ -138,7 +174,6 @@ struct LineElement {
     conditions: Option<Vec<ConditionElement>>,
 }
 
-// TODO: Also aggregate information about branches
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct BranchElement {
