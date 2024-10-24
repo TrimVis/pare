@@ -6,13 +6,13 @@ use crate::db::DbWriter;
 use crate::types::Status;
 use crate::ARGS;
 
+use crossbeam::channel;
 use log::debug;
 use log::{error, info, warn};
 use std::fs::create_dir_all;
 use std::mem;
 use std::path::Path;
 use std::process::exit;
-use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
@@ -25,14 +25,14 @@ pub(super) struct Worker {
 impl Worker {
     pub(super) fn new_cmd(
         id: usize,
-        receiver: Arc<Mutex<mpsc::Receiver<RunnerQueueMessage>>>,
-        processing_queue: mpsc::Sender<ProcessingQueueMessage>,
+        receiver: channel::Receiver<RunnerQueueMessage>,
+        processing_queue: channel::Sender<ProcessingQueueMessage>,
     ) -> Worker {
         let thread = thread::spawn(move || {
             loop {
                 let cvc5cmd = Path::join(&ARGS.build_dir, "bin/cvc5");
 
-                let job = receiver.lock().unwrap().recv();
+                let job = receiver.recv();
                 match job {
                     Ok(RunnerQueueMessage::Start(benchmark)) => {
                         info!("[Worker {}] Received job (bench_id: {})", id, benchmark.id);
@@ -116,8 +116,8 @@ impl Worker {
     }
 
     pub(super) fn new_processing(
-        ready_sender: mpsc::Sender<Result<(), ()>>,
-        receiver: mpsc::Receiver<ProcessingQueueMessage>,
+        ready_sender: channel::Sender<Result<(), ()>>,
+        receiver: channel::Receiver<ProcessingQueueMessage>,
     ) -> Worker {
         let thread = thread::spawn(move || {
             // Db Setup

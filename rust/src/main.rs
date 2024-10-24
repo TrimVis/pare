@@ -21,6 +21,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    info!("Starting benchmark suite");
     panic::set_hook(Box::new(|panic_info| {
         error!("Panic occurred: {:?}", panic_info);
     }));
@@ -44,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(log_target))
-        .filter(None, LevelFilter::Debug) // Set default log level to Info
+        .filter(None, LevelFilter::Info) // Set default log level to Info
         .format_level(true)
         .format_timestamp_secs()
         .build();
@@ -57,6 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Runner Setup
     let mut runner = runner::Runner::new();
     runner.wait_on_db_ready();
+    info!("Waiting on db to be initialized");
 
     let mut db = db::DbReader::new()?;
 
@@ -72,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .progress_chars("##-"),
     );
 
+    info!("Enqueuing all benchmarks");
     // FIXME: This approach causes Ctrl+C to not work
     // Ensure that there are always enough benchmarks enqueue
     for b in db.retrieve_benchmarks_waiting(None)? {
@@ -90,8 +93,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             "ETA: ?".to_string()
         };
-        done_pb.set_message(eta_msg);
+        done_pb.set_message(eta_msg.clone());
         done_pb.set_position(done_count);
+        info!(" PROCESSED {}/{} BENCHMARK FILES", done_count, total_count);
+        info!(" {}", eta_msg);
 
         // Early return in case of Ctrl+C or in case we already completed all tasks
         if !running.load(Ordering::SeqCst) || done_count == total_count {

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.38"
 clap = { version = "4.5.20", features = ["derive"] }
+crossbeam = "0.8.4"
 ctrlc = "3.4.5"
 dur = "0.5.3"
 env_logger = "0.11.5"

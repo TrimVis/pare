@@ -6,9 +6,9 @@ pub use gcov::GcovRes;
 use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
 
+use crossbeam::channel;
 use std::collections::HashSet;
 use std::process::exit;
-use std::sync::{mpsc, Arc, Mutex};
 
 enum RunnerQueueMessage {
     Start(Benchmark),
@@ -23,11 +23,11 @@ enum ProcessingQueueMessage {
 
 pub struct Runner {
     runner_workers: Vec<worker::Worker>,
-    runner_queue: mpsc::Sender<RunnerQueueMessage>,
+    runner_queue: channel::Sender<RunnerQueueMessage>,
 
-    processing_worker_ready_queue: mpsc::Receiver<Result<(), ()>>,
+    processing_worker_ready_queue: channel::Receiver<Result<(), ()>>,
     processing_worker: worker::Worker,
-    processing_queue: mpsc::Sender<ProcessingQueueMessage>,
+    processing_queue: channel::Sender<ProcessingQueueMessage>,
 
     enqueued: Box<HashSet<u64>>,
 }
@@ -38,20 +38,21 @@ impl Runner {
 
         assert!(no_workers > 0);
 
-        let (p_ready_send, p_ready_receiver) = mpsc::channel();
-        let (p_sender, p_receiver) = mpsc::channel();
+        let (p_ready_send, p_ready_receiver) = channel::bounded(1);
+        let (p_sender, p_receiver) = channel::bounded(ARGS.job_size);
         let processing_queue = p_sender;
-        let processing_worker = worker::Worker::new_processing(p_ready_send.clone(), p_receiver);
+        let processing_worker =
+            worker::Worker::new_processing(p_ready_send.clone(), p_receiver.clone());
 
-        let (r_sender, r_receiver) = mpsc::channel();
-        let runner_receiver = Arc::new(Mutex::new(r_receiver));
+        let (r_sender, r_receiver) = channel::unbounded();
+        let runner_receiver = r_receiver;
         let runner_queue = r_sender;
 
         let mut runner_workers = Vec::with_capacity(no_workers);
         for id in 0..no_workers {
             runner_workers.push(worker::Worker::new_cmd(
                 id,
-                Arc::clone(&runner_receiver),
+                runner_receiver.clone(),
                 processing_queue.clone(),
             ));
         }
