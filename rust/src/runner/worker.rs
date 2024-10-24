@@ -35,14 +35,30 @@ impl Worker {
                     Ok(RunnerQueueMessage::Start(benchmark)) => {
                         info!("[Worker {}] Received job (bench_id: {})", id, benchmark.id);
                         let result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
-                        processing_queue
+                        let res_exit = result.exit_code;
+                        match processing_queue
                             .send(ProcessingQueueMessage::Cvc5Res(benchmark.clone(), result))
-                            .unwrap();
+                        {
+                            Ok(_) => {}
+                            Err(_) => {
+                                warn!("Worker could not send cvc5 result to DB writer");
+                                break;
+                            }
+                        }
 
-                        let result = gcov::process(&benchmark);
-                        processing_queue
-                            .send(ProcessingQueueMessage::GcovRes(benchmark, result))
-                            .unwrap();
+                        // Coverage reports are not a thing if the process didn't terminate gracefully
+                        if res_exit == 0 {
+                            let result = gcov::process(&benchmark);
+                            match processing_queue
+                                .send(ProcessingQueueMessage::GcovRes(benchmark, result))
+                            {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    warn!("Worker could not send gcov result to DB writer");
+                                    break;
+                                }
+                            }
+                        }
                     }
                     Ok(RunnerQueueMessage::Stop) => {
                         warn!("[Worker {}] Received stop signal.", id);
@@ -104,9 +120,17 @@ impl Worker {
                             "[DB Writer] Received cvc5 result (bench_id: {})",
                             benchmark.id
                         );
+                        let res_exit = result.exit_code;
                         db.add_cvc5_run_result(result).unwrap();
-                        db.update_benchmark_status(benchmark.id, Status::Processing)
-                            .unwrap();
+                        db.update_benchmark_status(
+                            benchmark.id,
+                            if res_exit == 0 {
+                                Status::Processing
+                            } else {
+                                Status::Done
+                            },
+                        )
+                        .unwrap();
                     }
                     Ok(ProcessingQueueMessage::GcovRes(benchmark, result)) => {
                         info!(

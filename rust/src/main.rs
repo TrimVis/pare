@@ -57,9 +57,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut db = db::DbReader::new()?;
 
     // Fancy overall progress bar
-    let total_entries = db.remaining_count()?;
-    let pb = multi.add(ProgressBar::new(total_entries));
-    pb.set_style(
+    let total_count = db.total_count()?;
+    let done_pb = multi.add(ProgressBar::new(total_count));
+    done_pb.set_style(
         ProgressStyle::default_bar()
             .template(
                 "{spinner:.green} [{elapsed_precise}] [{msg}] [{wide_bar:40.cyan/blue}] {percent_precise}% {pos:>3}/{len:3} Processing Benchmarks",
@@ -68,31 +68,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .progress_chars("##-"),
     );
 
-    let mut remaining_entries = db.remaining_count()?;
+    // Ensure that there are always enough benchmarks enqueue
+    for b in db.retrieve_benchmarks_waiting(None)? {
+        runner.enqueue(b);
+    }
 
+    let mut done_count = db.waiting_count()?;
     let loop_start = Instant::now();
-
-    while remaining_entries > 0 {
+    while done_count < total_count {
         // Early return in case of Ctrl+C
         if !running.load(Ordering::SeqCst) {
             runner.stop();
             break;
         }
 
-        let benchmarks = db.retrieve_benchmarks_waiting(10 * ARGS.job_size)?;
-        for r in benchmarks {
-            runner.enqueue(r);
-        }
+        // Everything below this is only for a nice progress bar and to know when to return
+        done_count = db.done_count()?;
+        let eta_msg = if done_count > 0 {
+            let avg_entry_dur = loop_start.elapsed() / done_count.try_into().unwrap();
+            let eta = avg_entry_dur * total_count.try_into().unwrap();
+            format!("ETA: {}", DurDuration::from(eta))
+        } else {
+            "ETA: ?".to_string()
+        };
+        done_pb.set_message(eta_msg);
+        done_pb.set_position(done_count);
 
-        thread::sleep(Duration::from_secs(2));
-        remaining_entries = db.remaining_count()?;
-        let processed_entries = total_entries - remaining_entries;
-        let avg_entry_dur = loop_start.elapsed() / (processed_entries + 1).try_into().unwrap();
-        let eta = avg_entry_dur * remaining_entries.try_into().unwrap();
-
-        let msg = format!("ETA: {}", DurDuration::from(eta));
-        pb.set_message(msg);
-        pb.set_position(processed_entries);
+        // High timeout to not introduce unnecessary overhead
+        thread::sleep(Duration::from_secs(60));
     }
 
     // Wait for runners to work of the queue

@@ -22,19 +22,68 @@ impl DbReader {
             OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
 
+        conn.execute("PRAGMA read_uncommitted = TRUE;", [])?;
+
         Ok(DbReader { conn })
     }
 
-    pub fn retrieve_benchmarks_waiting(&mut self, limit: usize) -> ResultT<Vec<Benchmark>> {
-        let enqueued = self.retrieve_bench_of_status(Status::Running, limit)?.len();
-        self.retrieve_bench_of_status(Status::Waiting, limit - enqueued)
+    pub fn retrieve_benchmarks_waiting(&mut self, limit: Option<u32>) -> ResultT<Vec<Benchmark>> {
+        if let Some(limit) = limit {
+            let running = self.retrieve_benchcount_of_status(Status::Running, limit)?;
+            let processing = self.retrieve_benchcount_of_status(Status::Processing, limit)?;
+            self.retrieve_bench_of_status(Status::Waiting, limit - running - processing)
+        } else {
+            self.retrieve_all_bench_of_status(Status::Waiting)
+        }
     }
 
-    fn retrieve_bench_of_status(
-        &mut self,
-        status: Status,
-        limit: usize,
-    ) -> ResultT<Vec<Benchmark>> {
+    fn retrieve_benchcount_of_status(&mut self, status: Status, limit: u32) -> ResultT<u32> {
+        let mut stmt_select_benchstatus = self
+            .conn
+            .prepare_cached(
+                "SELECT COUNT(1) FROM \"status_benchmarks\" AS s WHERE s.status = ?1 LIMIT ?2",
+            )
+            .expect("Issue during benchstatus select query preparation");
+        let count = stmt_select_benchstatus
+            .query_row(params![status as u8, limit], |row| row.get(0))
+            .expect("Issue during benchmark status update!");
+
+        Ok(count)
+    }
+
+    fn retrieve_all_bench_of_status(&mut self, status: Status) -> ResultT<Vec<Benchmark>> {
+        let mut stmt_select_benchstatus = self
+            .conn
+            .prepare_cached(
+                "SELECT s.bench_id, b.path, b.prefix
+                FROM \"status_benchmarks\" AS s
+                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
+                WHERE s.status = ?1",
+            )
+            .expect("Issue during benchstatus select query preparation");
+        let rows = stmt_select_benchstatus
+            .query_map(params![status as u8], |row| {
+                let path: String = row.get(1)?;
+                let prefix: String = row.get(2)?;
+                Ok(Benchmark {
+                    id: row.get(0)?,
+                    path: PathBuf::from(path),
+                    prefix: match prefix.as_str() {
+                        "" => None,
+                        _ => Some(PathBuf::from(prefix)),
+                    },
+                })
+            })
+            .expect("Issue during benchmark status update!");
+
+        let mut res = vec![];
+        for row in rows {
+            res.push(row.unwrap());
+        }
+        Ok(res)
+    }
+
+    fn retrieve_bench_of_status(&mut self, status: Status, limit: u32) -> ResultT<Vec<Benchmark>> {
         let mut stmt_select_benchstatus = self
             .conn
             .prepare_cached(
@@ -60,29 +109,40 @@ impl DbReader {
             })
             .expect("Issue during benchmark status update!");
 
-        let mut res = Vec::with_capacity(limit);
+        let mut res = Vec::with_capacity(limit as usize);
         for row in rows {
             res.push(row.unwrap());
         }
         Ok(res)
     }
 
-    pub fn remaining_count(&mut self) -> ResultT<u64> {
+    pub fn waiting_count(&mut self) -> ResultT<u64> {
         let mut stmt_count_benchstatus = self
             .conn
             .prepare_cached(
                 "SELECT COUNT(1)
                 FROM \"status_benchmarks\" AS s
-                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
-                WHERE s.status = ?1",
+                WHERE s.status == ?1",
             )
             .expect("Issue during benchstatus count query preparation");
-        let mut stmt_count_benchstatus_total = self
+
+        let row_count_done = {
+            let mut res = stmt_count_benchstatus.query(params![Status::Waiting as u8])?;
+            let row = res.next()?.unwrap();
+            let row_count: u64 = row.get(0)?;
+            row_count
+        };
+
+        Ok(row_count_done)
+    }
+
+    pub fn done_count(&mut self) -> ResultT<u64> {
+        let mut stmt_count_benchstatus = self
             .conn
             .prepare_cached(
                 "SELECT COUNT(1)
                 FROM \"status_benchmarks\" AS s
-                JOIN \"benchmarks\" AS b ON b.id = s.bench_id",
+                WHERE s.status == ?1",
             )
             .expect("Issue during benchstatus count query preparation");
 
@@ -92,14 +152,24 @@ impl DbReader {
             let row_count: u64 = row.get(0)?;
             row_count
         };
+
+        Ok(row_count_done)
+    }
+
+    pub fn total_count(&mut self) -> ResultT<u64> {
+        let mut stmt_count_benchstatus = self
+            .conn
+            .prepare_cached("SELECT COUNT(1) FROM \"status_benchmarks\" AS s")
+            .expect("Issue during benchstatus count query preparation");
+
         let row_count_total = {
-            let mut res = stmt_count_benchstatus_total.query(params![])?;
+            let mut res = stmt_count_benchstatus.query(params![])?;
             let row = res.next()?.unwrap();
             let row_count: u64 = row.get(0)?;
             row_count
         };
 
-        Ok(row_count_total - row_count_done)
+        Ok(row_count_total)
     }
 }
 
@@ -109,7 +179,7 @@ pub struct DbWriter {
 
 impl DbWriter {
     pub fn new(init: bool) -> ResultT<Self> {
-        let conn = Connection::open_with_flags(
+        let mut conn = Connection::open_with_flags(
             MEMORY_CONN_URI,
             OpenFlags::SQLITE_OPEN_URI
                 | OpenFlags::SQLITE_OPEN_CREATE
@@ -121,11 +191,13 @@ impl DbWriter {
             info!("Creating tables...");
             init::create_tables(&conn).expect("Issue during table creation");
             info!("Populating config table...");
-            init::populate_config(&conn).expect("Issue during config table population");
+            init::populate_config(conn.transaction()?)
+                .expect("Issue during config table population");
             info!("Populating benchmarks table...");
-            init::populate_benchmarks(&conn).expect("Issue during benchmark table population");
+            init::populate_benchmarks(conn.transaction()?)
+                .expect("Issue during benchmark table population");
             info!("Populating status table...");
-            init::populate_status(&conn).expect("Issue during status population");
+            init::populate_status(conn.transaction()?).expect("Issue during status population");
         }
 
         Ok(DbWriter { conn })

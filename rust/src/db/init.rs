@@ -3,15 +3,15 @@ use crate::types::Status;
 use crate::{ResultT, ARGS};
 
 use glob::glob;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction};
 use sha2::{Digest, Sha256};
 use std::fs;
 
 pub(super) fn prepare(conn: &Connection) -> ResultT<()> {
     // Disable disk sync after every transaction
     conn.execute("PRAGMA synchronous = OFF", [])?;
-    // Increase cache size to 1GB
-    conn.execute("PRAGMA cache_size = -1000000", [])?;
+    // Increase cache size to 10MB
+    conn.execute("PRAGMA cache_size = -10000", [])?;
     // Increase page size to 64kB
     conn.execute("PRAGMA page_size = 65536", [])?;
     // Store temporary tables in memory
@@ -186,87 +186,97 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
     Ok(())
 }
 
-pub(super) fn populate_config(conn: &Connection) -> ResultT<()> {
+pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
     let c_insert = "INSERT INTO \"config\" (key, value) VALUES (?1, ?2)";
-    conn.execute(
+    tx.execute(
         &c_insert,
         params!["individual_gcov_prefixes", ARGS.individual_prefixes],
     )?;
 
     for (i, c) in ARGS.coverage_kinds.iter().enumerate() {
         let k = format!("coverage_kind_{}", i);
-        conn.execute(&c_insert, params![k, c.to_string()])?;
+        tx.execute(&c_insert, params![k, c.to_string()])?;
     }
 
-    conn.execute(&c_insert, params!["coverage_mode", ARGS.mode.to_string()])?;
+    tx.execute(&c_insert, params!["coverage_mode", ARGS.mode.to_string()])?;
 
-    conn.execute(&c_insert, params!["job_size", ARGS.job_size])?;
+    tx.execute(&c_insert, params!["job_size", ARGS.job_size])?;
 
-    conn.execute(&c_insert, params!["cvc5_args", ARGS.cvc5_args])?;
+    tx.execute(&c_insert, params!["cvc5_args", ARGS.cvc5_args])?;
 
-    conn.execute(
+    tx.execute(
         &c_insert,
         params!["benchmark_dir", ARGS.benchmark_dir.display().to_string()],
     )?;
 
+    tx.commit()?;
+
     Ok(())
 }
 
-pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
+pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
     // TODO: Readd sampling support
-    let mut stmt = conn.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
+    {
+        let mut stmt = tx.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
-    let prefix_base = ARGS.tmp_dir.as_ref().unwrap();
-    fs::create_dir_all(&prefix_base)
-        .expect("Could not create temporary base folder for prefix files");
+        let prefix_base = ARGS.tmp_dir.as_ref().unwrap();
+        fs::create_dir_all(&prefix_base)
+            .expect("Could not create temporary base folder for prefix files");
 
-    let bench_dir = &ARGS.benchmark_dir;
-    let bench_dir = bench_dir.canonicalize().unwrap().display().to_string();
-    let pattern = format!("{}/**/*.smt2", bench_dir);
+        let bench_dir = &ARGS.benchmark_dir;
+        let bench_dir = bench_dir.canonicalize().unwrap().display().to_string();
+        let pattern = format!("{}/**/*.smt2", bench_dir);
 
-    for entry in glob(&pattern).expect("Failed to read glob pattern") {
-        if let Ok(file) = entry {
-            let dfile = file.canonicalize().unwrap().display().to_string();
-            let prefix = if ARGS.individual_prefixes {
-                let mut hasher = Sha256::new();
-                hasher.update(file.to_string_lossy().as_bytes());
-                let hash = format!("{:x}", hasher.finalize());
+        for entry in glob(&pattern).expect("Failed to read glob pattern") {
+            if let Ok(file) = entry {
+                let dfile = file.canonicalize().unwrap().display().to_string();
+                let prefix = if ARGS.individual_prefixes {
+                    let mut hasher = Sha256::new();
+                    hasher.update(file.to_string_lossy().as_bytes());
+                    let hash = format!("{:x}", hasher.finalize());
 
-                let prefix = prefix_base.join(hash);
-                if !prefix.exists() {
-                    fs::create_dir(&prefix).expect("Could not create prefix dir");
-                }
+                    let prefix = prefix_base.join(hash);
+                    if !prefix.exists() {
+                        fs::create_dir(&prefix).expect("Could not create prefix dir");
+                    }
 
-                let prefix = prefix.canonicalize().unwrap().display().to_string();
-                prefix
-            } else {
-                "".to_string()
-            };
+                    let prefix = prefix.canonicalize().unwrap().display().to_string();
+                    prefix
+                } else {
+                    "".to_string()
+                };
 
-            // TODO: Instead of storing the full path only store the difference
-            // due to file size reasons
+                // TODO: Instead of storing the full path only store the difference
+                // due to file size reasons
 
-            stmt.execute(params![dfile, prefix])?;
+                stmt.execute(params![dfile, prefix])?;
+            }
         }
     }
 
+    tx.commit()?;
+
     Ok(())
 }
 
-pub(super) fn populate_status(conn: &Connection) -> ResultT<()> {
+pub(super) fn populate_status(tx: Transaction) -> ResultT<()> {
     // TODO: Readd sampling support
-    let mut select_stmt = conn.prepare("SELECT id FROM \"benchmarks\"")?;
-    let bench_rows = select_stmt.query_map([], |row| {
-        let id: u64 = row.get(0)?;
-        Ok(id)
-    })?;
+    {
+        let mut select_stmt = tx.prepare("SELECT id FROM \"benchmarks\"")?;
+        let bench_rows = select_stmt.query_map([], |row| {
+            let id: u64 = row.get(0)?;
+            Ok(id)
+        })?;
 
-    let mut stmt =
-        conn.prepare("INSERT INTO \"status_benchmarks\" (bench_id, status) VALUES (?1, ?2)")?;
-    for row in bench_rows {
-        let bench_id = row.unwrap();
-        stmt.execute(params![bench_id, Status::Waiting as u64])?;
+        let mut stmt =
+            tx.prepare("INSERT INTO \"status_benchmarks\" (bench_id, status) VALUES (?1, ?2)")?;
+        for row in bench_rows {
+            let bench_id = row.unwrap();
+            stmt.execute(params![bench_id, Status::Waiting as u64])?;
+        }
     }
+
+    tx.commit()?;
 
     Ok(())
 }

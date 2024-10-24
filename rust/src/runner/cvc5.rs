@@ -32,7 +32,7 @@ pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Benchmark
 
     return Some(BenchmarkRun {
         bench_id: benchmark.id,
-        exit_code: output.status.code().unwrap_or(5),
+        exit_code: output.status.code().unwrap_or(100000),
         time_ms: duration
             .as_millis()
             .try_into()
