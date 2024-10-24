@@ -7,7 +7,7 @@ use crate::types::ResultT;
 
 use fern::Dispatch;
 pub use log::{error, info, warn};
-use std::fs::{create_dir_all, File};
+use std::fs::{create_dir_all, remove_dir_all, File};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SIGINT setup
     let r = running.clone();
     ctrlc::set_handler(move || {
-        warn!("Received Ctrl+C! Exiting gracefully...");
+        warn!("Received Ctrl+C! Killing workers...");
         r.store(false, Ordering::SeqCst);
     })
     .expect("Error setting Ctrl+C handler");
@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while remaining_entries > 0 {
         // Early return in case of Ctrl+C
         if !running.load(Ordering::SeqCst) {
+            runner.stop();
             break;
         }
 
@@ -81,13 +82,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             runner.enqueue_cvc5(r);
         }
 
-        // TODO: This isn't really optimal with the sleep, but good enough
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(2));
         remaining_entries = db.remaining_count()?;
     }
 
-    // Tell runners to stop after queue has been worked of
-    runner.stop();
+    // Wait for runners to work of the queue
+    runner.join();
+
+    // Remove the tmp directory
+    remove_dir_all(ARGS.tmp_dir.clone().unwrap())?;
 
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());

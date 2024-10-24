@@ -61,14 +61,20 @@ impl<'a> Db<'a> {
         &mut self,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
-        self.retrieve_bench_of_status(Status::WaitingProcessing, limit)
+        let enqueued = self
+            .retrieve_bench_of_status(Status::Processing, limit)?
+            .len();
+        self.retrieve_bench_of_status(Status::WaitingProcessing, limit - enqueued)
     }
 
     pub fn retrieve_benchmarks_waiting_for_cvc5(
         &mut self,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
-        self.retrieve_bench_of_status(Status::Waiting, limit)
+        let enqueued = self
+            .retrieve_bench_of_status(Status::Processing, limit)?
+            .len();
+        self.retrieve_bench_of_status(Status::Waiting, limit - enqueued)
     }
 
     fn retrieve_bench_of_status(

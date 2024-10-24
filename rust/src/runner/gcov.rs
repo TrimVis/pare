@@ -8,6 +8,7 @@ use log::error;
 use serde::Deserialize;
 use serde_json;
 use std::collections::HashMap;
+use std::fs::remove_file;
 use std::os::unix::fs::symlink;
 use std::process::Command;
 
@@ -41,12 +42,15 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let mut ires: GcovIRes = HashMap::new();
     for entry in glob(&pattern).expect("Failed to read glob pattern") {
         if let Ok(gcda_file) = entry {
-            if ARGS.individual_prefixes {
+            let gcno_symlink = if ARGS.individual_prefixes {
                 let gcno_file_dst = gcda_file.to_str().unwrap();
                 let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
                 let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
                 symlink(&gcno_file_src, &gcno_file_dst).unwrap_or(());
-            }
+                Some(gcno_file_dst)
+            } else {
+                None
+            };
 
             let args = ["--json", "--stdout", gcda_file.to_str().unwrap()];
             let output = Command::new("gcov")
@@ -109,6 +113,12 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                 } else {
                     ires.insert(key.clone(), value.clone());
                 }
+            }
+
+            // Delete the gcda file gcno file if it was symlinked
+            remove_file(gcda_file);
+            if let Some(file) = gcno_symlink {
+                remove_file(file);
             }
         }
     }
