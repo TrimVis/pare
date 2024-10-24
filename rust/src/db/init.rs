@@ -5,11 +5,9 @@ use crate::{ResultT, ARGS};
 use glob::glob;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
 use std::fs;
 
-pub(super) fn prepare(conn: &RefCell<Connection>) -> ResultT<()> {
-    let conn = conn.borrow_mut();
+pub(super) fn prepare(conn: &Connection) -> ResultT<()> {
     // Disable disk sync after every transaction
     conn.execute("PRAGMA synchronous = OFF", [])?;
     // Increase cache size to 1GB
@@ -26,8 +24,7 @@ pub(super) fn prepare(conn: &RefCell<Connection>) -> ResultT<()> {
     Ok(())
 }
 
-pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
-    let conn = conn.borrow_mut();
+pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
     // Stores the arguments and other run parameters
     let config_table = "CREATE TABLE IF NOT EXISTS \"config\" (
                 key TEXT NOT NULL PRIMARY KEY,
@@ -189,8 +186,7 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
     Ok(())
 }
 
-pub(super) fn populate_config(conn: &RefCell<Connection>) -> ResultT<()> {
-    let conn = conn.borrow_mut();
+pub(super) fn populate_config(conn: &Connection) -> ResultT<()> {
     let c_insert = "INSERT INTO \"config\" (key, value) VALUES (?1, ?2)";
     conn.execute(
         &c_insert,
@@ -216,8 +212,7 @@ pub(super) fn populate_config(conn: &RefCell<Connection>) -> ResultT<()> {
     Ok(())
 }
 
-pub(super) fn populate_benchmarks(conn: &RefCell<Connection>) -> ResultT<()> {
-    let conn = conn.borrow_mut();
+pub(super) fn populate_benchmarks(conn: &Connection) -> ResultT<()> {
     // TODO: Readd sampling support
     let mut stmt = conn.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
@@ -258,8 +253,7 @@ pub(super) fn populate_benchmarks(conn: &RefCell<Connection>) -> ResultT<()> {
     Ok(())
 }
 
-pub(super) fn populate_status(conn: &RefCell<Connection>) -> ResultT<()> {
-    let conn = conn.borrow_mut();
+pub(super) fn populate_status(conn: &Connection) -> ResultT<()> {
     // TODO: Readd sampling support
     let mut select_stmt = conn.prepare("SELECT id FROM \"benchmarks\"")?;
     let bench_rows = select_stmt.query_map([], |row| {

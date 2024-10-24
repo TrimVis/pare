@@ -12,8 +12,7 @@ use indicatif_log_bridge::LogWrapper;
 use log::LevelFilter;
 pub use log::{error, info, warn};
 use multiwriter::MultiWriter;
-use std::fs::{create_dir_all, remove_dir_all, File};
-use std::path::Path;
+use std::fs::{remove_dir_all, File};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -51,23 +50,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     LogWrapper::new(multi.clone(), logger).try_init()?;
     log::set_max_level(level);
 
-    // Db Setup
-    if ARGS.result_db.to_str().unwrap() != ":memory:" {
-        assert!(!ARGS.result_db.exists(), "DB file already exists.");
-        let out_dir = ARGS.result_db.parent().unwrap();
-        let out_dir = {
-            // Just to make sure we can canonicalize it at all
-            if out_dir.is_relative() {
-                Path::new("./").join(out_dir).canonicalize().unwrap()
-            } else {
-                out_dir.canonicalize().unwrap()
-            }
-        };
-        create_dir_all(out_dir).unwrap();
-    }
+    // Runner Setup
+    let mut runner = runner::Runner::new();
+    runner.wait_on_db_ready();
 
-    let mut db = db::Db::new()?;
-    db.init()?;
+    let mut db = db::DbReader::new()?;
 
     // Fancy overall progress bar
     let total_entries = db.remaining_count()?;
@@ -81,8 +68,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .progress_chars("##-"),
     );
 
-    // Runner Setup
-    let mut runner = runner::Runner::new();
     let mut remaining_entries = db.remaining_count()?;
 
     let loop_start = Instant::now();
@@ -119,6 +104,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for runners to work of the queue
     runner.join();
+
+    db.write_to_disk()?;
 
     // Remove the tmp directory
     remove_dir_all(ARGS.tmp_dir.clone().unwrap())?;

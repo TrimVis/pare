@@ -7,6 +7,7 @@ use crate::types::{Benchmark, BenchmarkRun};
 use crate::ARGS;
 
 use std::collections::HashSet;
+use std::process::exit;
 use std::sync::{mpsc, Arc, Mutex};
 
 enum RunnerQueueMessage {
@@ -27,8 +28,9 @@ pub struct Runner {
     runner_workers: Vec<worker::Worker>,
     runner_queue: mpsc::Sender<RunnerQueueMessage>,
 
+    processing_worker_ready_queue: mpsc::Receiver<Result<(), ()>>,
     processing_worker: worker::Worker,
-    processing_queue: Arc<Mutex<mpsc::Sender<ProcessingQueueMessage>>>,
+    processing_queue: mpsc::Sender<ProcessingQueueMessage>,
 
     cvc5_enqueued: Box<HashSet<u64>>,
     gcov_enqueued: Box<HashSet<u64>>,
@@ -40,9 +42,10 @@ impl Runner {
 
         assert!(no_workers > 0);
 
+        let (p_ready_send, p_ready_receiver) = mpsc::channel();
         let (p_sender, p_receiver) = mpsc::channel();
-        let processing_queue = Arc::new(Mutex::new(p_sender));
-        let processing_worker = worker::Worker::new_processing(p_receiver);
+        let processing_queue = p_sender;
+        let processing_worker = worker::Worker::new_processing(p_ready_send.clone(), p_receiver);
 
         let (r_sender, r_receiver) = mpsc::channel();
         let runner_receiver = Arc::new(Mutex::new(r_receiver));
@@ -53,7 +56,7 @@ impl Runner {
             runner_workers.push(worker::Worker::new_cmd(
                 id,
                 Arc::clone(&runner_receiver),
-                Arc::clone(&processing_queue),
+                processing_queue.clone(),
             ));
         }
 
@@ -61,11 +64,19 @@ impl Runner {
             runner_workers,
             runner_queue,
 
+            processing_worker_ready_queue: p_ready_receiver,
             processing_worker,
             processing_queue,
 
             cvc5_enqueued: Box::from(HashSet::new()),
             gcov_enqueued: Box::from(HashSet::new()),
+        }
+    }
+
+    pub fn wait_on_db_ready(&mut self) {
+        match self.processing_worker_ready_queue.recv() {
+            Ok(_) => {}
+            Err(_) => exit(1),
         }
     }
 
@@ -75,8 +86,6 @@ impl Runner {
         if !self.gcov_enqueued.contains(&benchmark.id) {
             self.gcov_enqueued.insert(benchmark.id);
             self.processing_queue
-                .lock()
-                .unwrap()
                 .send(ProcessingQueueMessage::GcovStart(benchmark.id))
                 .unwrap();
             self.runner_queue
@@ -91,8 +100,6 @@ impl Runner {
         if !self.cvc5_enqueued.contains(&benchmark.id) {
             self.cvc5_enqueued.insert(benchmark.id);
             self.processing_queue
-                .lock()
-                .unwrap()
                 .send(ProcessingQueueMessage::Cvc5Start(benchmark.id))
                 .unwrap();
             self.runner_queue
@@ -105,8 +112,6 @@ impl Runner {
     pub fn stop(&mut self) {
         self.runner_queue.send(RunnerQueueMessage::Stop).unwrap();
         self.processing_queue
-            .lock()
-            .unwrap()
             .send(ProcessingQueueMessage::Stop)
             .unwrap();
     }

@@ -1,59 +1,33 @@
 mod init;
-mod stmts;
 use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::GcovRes;
 use crate::types::{Benchmark, BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
 
 use log::info;
-use rusqlite::{params, Connection};
-use std::cell::RefCell;
+use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 
-pub struct Db<'a> {
-    conn: Rc<RefCell<Connection>>,
+const MEMORY_CONN_URI: &str = "file::memory:?cache=shared";
 
-    stmts: stmts::Stmts<'a>,
+pub struct DbReader {
+    conn: Connection,
 }
 
-impl<'a> Db<'a> {
+impl DbReader {
     pub fn new() -> ResultT<Self> {
-        let conn = Rc::new(RefCell::new(Connection::open(&ARGS.result_db)?));
-        info!("Creating tables...");
-        init::create_tables(&conn).expect("Issue during table creation");
-        let stmts = stmts::Stmts::new(Rc::clone(&conn))?;
+        let conn = Connection::open_with_flags(
+            MEMORY_CONN_URI,
+            OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
 
-        Ok(Db { conn, stmts })
+        Ok(DbReader { conn })
     }
 
-    pub fn connect() -> ResultT<Self> {
-        let conn = Rc::new(RefCell::new(Connection::open(&ARGS.result_db)?));
-        let stmts = stmts::Stmts::new(Rc::clone(&conn))?;
-
-        Ok(Db { conn, stmts })
-    }
-
-    pub fn init(&self) -> ResultT<()> {
-        info!("Configuring database...");
-        init::prepare(&self.conn).expect("Issue during table preparation");
-        info!("Populating config table...");
-        init::populate_config(&self.conn).expect("Issue during config table population");
-        info!("Populating benchmarks table...");
-        init::populate_benchmarks(&self.conn).expect("Issue during benchmark table population");
-        info!("Populating status table...");
-        init::populate_status(&self.conn).expect("Issue during status population");
-
-        Ok(())
-    }
-
-    pub fn update_benchmark_status(&mut self, bench_id: u64, status: Status) -> ResultT<()> {
-        self.stmts
-            .update_benchstatus
-            .borrow_mut()
-            .execute(params![bench_id, status as u8])
-            .expect("Issue during benchmark status update!");
+    pub fn write_to_disk(&self) -> ResultT<()> {
+        let query = format!("VACUUM INTO '{}'", ARGS.result_db.display());
+        self.conn.execute(&query, params![])?;
         Ok(())
     }
 
@@ -61,20 +35,24 @@ impl<'a> Db<'a> {
         &mut self,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
+        // NOTE pjordan: This strategy does not really work
         let enqueued = self
             .retrieve_bench_of_status(Status::Processing, limit)?
             .len();
         self.retrieve_bench_of_status(Status::WaitingProcessing, limit - enqueued)
+        // self.retrieve_bench_of_status(Status::WaitingProcessing, limit)
     }
 
     pub fn retrieve_benchmarks_waiting_for_cvc5(
         &mut self,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
+        // NOTE pjordan: This strategy does not really work
         let enqueued = self
             .retrieve_bench_of_status(Status::Processing, limit)?
             .len();
         self.retrieve_bench_of_status(Status::Waiting, limit - enqueued)
+        // self.retrieve_bench_of_status(Status::Waiting, limit)
     }
 
     fn retrieve_bench_of_status(
@@ -82,8 +60,17 @@ impl<'a> Db<'a> {
         status: Status,
         limit: usize,
     ) -> ResultT<Vec<Benchmark>> {
-        let mut stmt = self.stmts.select_benchstatus.borrow_mut();
-        let rows = stmt
+        let mut stmt_select_benchstatus = self
+            .conn
+            .prepare_cached(
+                "SELECT s.bench_id, b.path, b.prefix
+                FROM \"status_benchmarks\" AS s
+                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
+                WHERE s.status = ?1
+                LIMIT ?2",
+            )
+            .expect("Issue during benchstatus select query preparation");
+        let rows = stmt_select_benchstatus
             .query_map(params![status as u8, limit], |row| {
                 let path: String = row.get(1)?;
                 let prefix: String = row.get(2)?;
@@ -106,16 +93,32 @@ impl<'a> Db<'a> {
     }
 
     pub fn remaining_count(&mut self) -> ResultT<u64> {
-        let mut stmt = self.stmts.count_benchstatus.borrow_mut();
+        let mut stmt_count_benchstatus = self
+            .conn
+            .prepare_cached(
+                "SELECT COUNT(1)
+                FROM \"status_benchmarks\" AS s
+                JOIN \"benchmarks\" AS b ON b.id = s.bench_id
+                WHERE s.status = ?1",
+            )
+            .expect("Issue during benchstatus count query preparation");
+        let mut stmt_count_benchstatus_total = self
+            .conn
+            .prepare_cached(
+                "SELECT COUNT(1)
+                FROM \"status_benchmarks\" AS s
+                JOIN \"benchmarks\" AS b ON b.id = s.bench_id",
+            )
+            .expect("Issue during benchstatus count query preparation");
+
         let row_count_done = {
-            let mut res = stmt.query(params![Status::Done as u8])?;
+            let mut res = stmt_count_benchstatus.query(params![Status::Done as u8])?;
             let row = res.next()?.unwrap();
             let row_count: u64 = row.get(0)?;
             row_count
         };
-        let mut stmt = self.stmts.count_benchstatus_total.borrow_mut();
         let row_count_total = {
-            let mut res = stmt.query(params![])?;
+            let mut res = stmt_count_benchstatus_total.query(params![])?;
             let row = res.next()?.unwrap();
             let row_count: u64 = row.get(0)?;
             row_count
@@ -123,11 +126,71 @@ impl<'a> Db<'a> {
 
         Ok(row_count_total - row_count_done)
     }
+}
+
+pub struct DbWriter {
+    conn: Connection,
+}
+
+impl DbWriter {
+    pub fn new(init: bool) -> ResultT<Self> {
+        let conn = Connection::open_with_flags(
+            MEMORY_CONN_URI,
+            OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )?;
+        if init {
+            info!("Configuring database...");
+            init::prepare(&conn).expect("Issue during table preparation");
+            info!("Creating tables...");
+            init::create_tables(&conn).expect("Issue during table creation");
+            info!("Populating config table...");
+            init::populate_config(&conn).expect("Issue during config table population");
+            info!("Populating benchmarks table...");
+            init::populate_benchmarks(&conn).expect("Issue during benchmark table population");
+            info!("Populating status table...");
+            init::populate_status(&conn).expect("Issue during status population");
+        }
+
+        Ok(DbWriter { conn })
+    }
+
+    pub fn write_to_disk(&self) -> ResultT<()> {
+        let query = format!("VACUUM INTO '{}'", ARGS.result_db.display());
+        self.conn.execute(&query, params![])?;
+        Ok(())
+    }
+
+    pub fn update_benchmark_status(&mut self, bench_id: u64, status: Status) -> ResultT<()> {
+        let mut stmt_update_benchstatus = self
+            .conn
+            .prepare_cached(
+                "INSERT INTO \"status_benchmarks\" (bench_id, status) 
+                VALUES (?1, ?2) 
+                ON CONFLICT(bench_id) DO UPDATE SET status = ?2",
+            )
+            .expect("Issue during status benchmark udpate query preparation");
+        stmt_update_benchstatus
+            .execute(params![bench_id, status as u8])
+            .expect("Issue during benchmark status update!");
+        Ok(())
+    }
 
     pub fn add_cvc5_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
-        self.stmts
-            .insert_cvc5result
-            .borrow_mut()
+        let mut stmt_insert_cvc5result = self
+            .conn
+            .prepare_cached(
+                "INSERT INTO \"result_benchmarks\" (
+                bench_id,
+                time_ms,
+                exit_code,
+                stdout,
+                stderr
+            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .expect("Issue during benchmark status update query preparation");
+        stmt_insert_cvc5result
             .execute(params![
                 run_result.bench_id,
                 run_result.time_ms,
@@ -142,11 +205,10 @@ impl<'a> Db<'a> {
     pub fn add_gcov_measurement(&mut self, bench_id: u64, run_result: GcovRes) -> ResultT<()> {
         // 1. Ensure all sources exist in DB & retrieve their ids
         {
-            let mut conn = self.conn.borrow_mut();
-            let src_tx = conn.transaction()?;
+            let src_tx = self.conn.transaction()?;
             {
                 let mut src_stmt =
-                    src_tx.prepare("INSERT INTO \"sources\" ( path ) VALUES ( ?1 )")?;
+                    src_tx.prepare_cached("INSERT INTO \"sources\" ( path ) VALUES ( ?1 )")?;
                 for (file, _) in &run_result {
                     src_stmt.execute(params![file])?;
                 }
@@ -156,8 +218,9 @@ impl<'a> Db<'a> {
 
         let mut srcid_file_map: HashMap<String, u64>;
         {
-            let conn = self.conn.borrow_mut();
-            let mut stmt = conn.prepare("SELECT id, path FROM \"sources\"")?;
+            let mut stmt = self
+                .conn
+                .prepare_cached("SELECT id, path FROM \"sources\"")?;
             let rows = stmt.query_map(params![], |row| {
                 let id: u64 = row.get(0)?;
                 let file: String = row.get(1)?;
@@ -173,10 +236,9 @@ impl<'a> Db<'a> {
         // 2. Ensure all (used) functions exist in DB & retrieve their ids
         if TRACK_FUNCS.clone() {
             {
-                let mut conn = self.conn.borrow_mut();
-                let func_tx = conn.transaction()?;
+                let func_tx = self.conn.transaction()?;
                 {
-                    let mut func_stmt = func_tx.prepare(
+                    let mut func_stmt = func_tx.prepare_cached(
                         "INSERT INTO \"functions\" (
                             source_id,
                             name,
@@ -208,8 +270,9 @@ impl<'a> Db<'a> {
 
             let mut id_fname_map: HashMap<(u64, String), u64>;
             {
-                let conn = self.conn.borrow_mut();
-                let mut stmt = conn.prepare("SELECT id, source_id, name FROM \"functions\"")?;
+                let mut stmt = self
+                    .conn
+                    .prepare_cached("SELECT id, source_id, name FROM \"functions\"")?;
                 let rows = stmt.query_map(params![], |row| {
                     let id: u64 = row.get(0)?;
                     let source_id: u64 = row.get(1)?;
@@ -225,8 +288,7 @@ impl<'a> Db<'a> {
 
             // 3. Insert all function usage data into the DB
             {
-                let mut conn = self.conn.borrow_mut();
-                let funcusage_tx = conn.transaction()?;
+                let funcusage_tx = self.conn.transaction()?;
                 {
                     let funcusage_query = if ARGS.mode == CoverageMode::Full {
                         format!(
@@ -246,7 +308,7 @@ impl<'a> Db<'a> {
                             DB_USAGE_NAME.clone()
                         )
                     };
-                    let mut funcusage_stmt = funcusage_tx.prepare(&funcusage_query)?;
+                    let mut funcusage_stmt = funcusage_tx.prepare_cached(&funcusage_query)?;
                     for (file, (funcs, _, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
                         for func in funcs {
@@ -267,10 +329,9 @@ impl<'a> Db<'a> {
         // 4. Ensure all lines exist in DB & retrieve their ids
         if TRACK_LINES.clone() {
             {
-                let mut conn = self.conn.borrow_mut();
-                let line_tx = conn.transaction()?;
+                let line_tx = self.conn.transaction()?;
                 {
-                    let mut line_stmt = line_tx.prepare(
+                    let mut line_stmt = line_tx.prepare_cached(
                         "INSERT INTO \"lines\" (
                             source_id,
                             line_no
@@ -291,8 +352,9 @@ impl<'a> Db<'a> {
 
             let mut id_line_map: HashMap<(u64, u64), u64>;
             {
-                let conn = self.conn.borrow();
-                let mut stmt = conn.prepare("SELECT id, source_id, line_no FROM \"lines\"")?;
+                let mut stmt = self
+                    .conn
+                    .prepare_cached("SELECT id, source_id, line_no FROM \"lines\"")?;
                 let rows = stmt.query_map(params![], |row| {
                     let id: u64 = row.get(0)?;
                     let source_id: u64 = row.get(1)?;
@@ -307,8 +369,7 @@ impl<'a> Db<'a> {
             }
             // 5. Insert all line usage data into the DB
             {
-                let mut conn = self.conn.borrow_mut();
-                let lineusage_tx = conn.transaction()?;
+                let lineusage_tx = self.conn.transaction()?;
                 {
                     let lineusage_query = if ARGS.mode == CoverageMode::Full {
                         format!(
@@ -328,7 +389,7 @@ impl<'a> Db<'a> {
                             DB_USAGE_NAME.clone()
                         )
                     };
-                    let mut lineusage_stmt = lineusage_tx.prepare(&lineusage_query)?;
+                    let mut lineusage_stmt = lineusage_tx.prepare_cached(&lineusage_query)?;
                     for (file, (_, lines, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
                         for line in lines {

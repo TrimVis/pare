@@ -2,13 +2,15 @@ use super::cvc5;
 use super::gcov;
 use super::ProcessingQueueMessage;
 use super::RunnerQueueMessage;
-use crate::db::Db;
+use crate::db::DbWriter;
 use crate::types::Status;
 use crate::ARGS;
 
 use log::{error, info, warn};
+use std::fs::create_dir_all;
 use std::mem;
 use std::path::Path;
+use std::process::exit;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -22,7 +24,7 @@ impl Worker {
     pub(super) fn new_cmd(
         id: usize,
         receiver: Arc<Mutex<mpsc::Receiver<RunnerQueueMessage>>>,
-        processing_queue: Arc<Mutex<mpsc::Sender<ProcessingQueueMessage>>>,
+        processing_queue: mpsc::Sender<ProcessingQueueMessage>,
     ) -> Worker {
         let thread = thread::spawn(move || {
             loop {
@@ -37,8 +39,6 @@ impl Worker {
                         );
                         let result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
                         processing_queue
-                            .lock()
-                            .unwrap()
                             .send(ProcessingQueueMessage::Cvc5Res(benchmark, result))
                             .unwrap();
                     }
@@ -50,8 +50,6 @@ impl Worker {
 
                         let result = gcov::process(&benchmark);
                         processing_queue
-                            .lock()
-                            .unwrap()
                             .send(ProcessingQueueMessage::GcovRes(benchmark, result))
                             .unwrap();
                     }
@@ -74,9 +72,35 @@ impl Worker {
         }
     }
 
-    pub(super) fn new_processing(receiver: mpsc::Receiver<ProcessingQueueMessage>) -> Worker {
+    pub(super) fn new_processing(
+        ready_sender: mpsc::Sender<Result<(), ()>>,
+        receiver: mpsc::Receiver<ProcessingQueueMessage>,
+    ) -> Worker {
         let thread = thread::spawn(move || {
-            let mut db = Db::connect().expect("Could not connect to the DB in worker");
+            // Db Setup
+            assert!(!ARGS.result_db.exists(), "DB file already exists.");
+            let out_dir = ARGS.result_db.parent().unwrap();
+            let out_dir = {
+                // Just to make sure we can canonicalize it at all
+                if out_dir.is_relative() {
+                    Path::new("./").join(out_dir).canonicalize().unwrap()
+                } else {
+                    out_dir.canonicalize().unwrap()
+                }
+            };
+            create_dir_all(out_dir).unwrap();
+
+            let db = DbWriter::new(true);
+            match db {
+                Ok(_) => ready_sender.send(Ok(())).unwrap(),
+                Err(_) => {
+                    ready_sender.send(Err(())).unwrap();
+                    error!("Error during DB initialization... terminating DB writer early");
+                    exit(1);
+                }
+            };
+            let mut db = db.unwrap();
+
             loop {
                 let job = receiver.recv();
                 match job {
