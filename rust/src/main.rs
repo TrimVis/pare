@@ -5,11 +5,11 @@ mod types;
 use crate::args::ARGS;
 use crate::types::ResultT;
 
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use log::LevelFilter;
 pub use log::{error, info, warn};
-use std::fs::{create_dir_all, remove_dir_all};
+use std::fs::{create_dir_all, remove_dir_all, File};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,6 +28,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     })
     .expect("Error setting Ctrl+C handler");
+
+    // File logging
+    fern::Dispatch::new()
+        .level(LevelFilter::Info)
+        .chain(File::create(&ARGS.log_file)?)
+        .apply()?;
 
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()

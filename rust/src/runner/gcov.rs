@@ -152,9 +152,9 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
         if TRACK_FUNCS.clone() {
             for function in &file.functions {
                 let usage = if ARGS.mode == CoverageMode::Full {
-                    function.execution_count
+                    function.execution_count as u32
                 } else {
-                    (function.execution_count > 0) as u32
+                    (function.execution_count as u32 > 0) as u32
                 };
                 let name = function.demangled_name.clone();
                 funcs.insert(
@@ -179,9 +179,9 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
         if TRACK_LINES.clone() {
             for line in &file.lines {
                 let usage = if ARGS.mode == CoverageMode::Full {
-                    line.count
+                    line.count as u32
                 } else {
-                    (line.count > 0) as u32
+                    (line.count as u32 > 0) as u32
                 };
                 lines.insert(
                     line.line_number,
@@ -228,7 +228,7 @@ struct FunctionElement {
     demangled_name: String,
     end_column: u32,
     end_line: u32,
-    execution_count: u32,
+    execution_count: f64,
     // name: String,
     start_column: u32,
     start_line: u32,
@@ -237,7 +237,7 @@ struct FunctionElement {
 #[derive(Debug, Deserialize)]
 struct LineElement {
     line_number: u32,
-    count: u32,
+    count: f64,
     // function_name: Option<String>, //TODO: Also incorporate this information into the DB
     // unexecuted_block: bool,
     // branches: Option<Vec<BranchElement>>,
