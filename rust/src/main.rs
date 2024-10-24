@@ -5,9 +5,11 @@ mod types;
 use crate::args::ARGS;
 use crate::types::ResultT;
 
-use fern::Dispatch;
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif_log_bridge::LogWrapper;
+use log::LevelFilter;
 pub use log::{error, info, warn};
-use std::fs::{create_dir_all, remove_dir_all, File};
+use std::fs::{create_dir_all, remove_dir_all};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,18 +30,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("Error setting Ctrl+C handler");
 
     // Logger Setup
-    Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}] {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                record.level(),
-                message
-            ))
-        })
-        .chain(std::io::stdout()) // log to console
-        .chain(File::create(&ARGS.log_file)?) // log to file
-        .apply()?;
+    let logger = env_logger::Builder::from_default_env()
+        .filter(None, LevelFilter::Info) // Set default log level to Info
+        .format_level(true)
+        .format_timestamp_secs()
+        .build();
+    let level = logger.filter();
+    let multi = MultiProgress::new();
+    // Make sure progress bar and logger don't come into anothers way
+    LogWrapper::new(multi.clone(), logger).try_init()?;
+    log::set_max_level(level);
 
     // Db Setup
     if ARGS.result_db.to_str().unwrap() != ":memory:" {
@@ -58,6 +58,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut db = db::Db::new()?;
     db.init()?;
+
+    // Fancy overall progress bar
+    let total_entries = db.remaining_count()?;
+    let pb = multi.add(ProgressBar::new(total_entries));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [ETA: {eta}] [{wide_bar:40.cyan/blue}] {percent_precise}% {pos:>3}/{len:3} {msg}",
+            )
+            .unwrap()
+            .progress_chars("##-"),
+    );
 
     // Runner Setup
     let mut runner = runner::Runner::new();
@@ -84,6 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         thread::sleep(Duration::from_secs(2));
         remaining_entries = db.remaining_count()?;
+        pb.set_position(total_entries - remaining_entries + 1);
     }
 
     // Wait for runners to work of the queue

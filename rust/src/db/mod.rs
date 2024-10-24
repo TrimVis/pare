@@ -105,19 +105,19 @@ impl<'a> Db<'a> {
         Ok(res)
     }
 
-    pub fn remaining_count(&mut self) -> ResultT<usize> {
+    pub fn remaining_count(&mut self) -> ResultT<u64> {
         let mut stmt = self.stmts.count_benchstatus.borrow_mut();
         let row_count_done = {
             let mut res = stmt.query(params![Status::Done as u8])?;
             let row = res.next()?.unwrap();
-            let row_count: usize = row.get(0)?;
+            let row_count: u64 = row.get(0)?;
             row_count
         };
         let mut stmt = self.stmts.count_benchstatus_total.borrow_mut();
         let row_count_total = {
             let mut res = stmt.query(params![])?;
             let row = res.next()?.unwrap();
-            let row_count: usize = row.get(0)?;
+            let row_count: u64 = row.get(0)?;
             row_count
         };
 

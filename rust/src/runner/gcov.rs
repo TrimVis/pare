@@ -116,9 +116,9 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
             }
 
             // Delete the gcda file gcno file if it was symlinked
-            remove_file(gcda_file);
+            remove_file(gcda_file).unwrap();
             if let Some(file) = gcno_symlink {
-                remove_file(file);
+                remove_file(file).unwrap();
             }
         }
     }
