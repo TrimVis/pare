@@ -6,6 +6,7 @@ mod types;
 use crate::args::ARGS;
 use crate::types::ResultT;
 
+use dur::Duration as DurDuration;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use log::LevelFilter;
@@ -74,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
-                "{spinner:.green} [{elapsed_precise}] [ETA: {eta}] [{wide_bar:40.cyan/blue}] {percent_precise}% {pos:>3}/{len:3} {msg}",
+                "{spinner:.green} [{elapsed_precise}] [{msg}] [{wide_bar:40.cyan/blue}] {percent_precise}% {pos:>3}/{len:3} Processing Benchmarks",
             )
             .unwrap()
             .progress_chars("##-"),
@@ -82,8 +83,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Runner Setup
     let mut runner = runner::Runner::new();
-
     let mut remaining_entries = db.remaining_count()?;
+
+    let loop_start = Instant::now();
+
     while remaining_entries > 0 {
         // Early return in case of Ctrl+C
         if !running.load(Ordering::SeqCst) {
@@ -105,7 +108,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         thread::sleep(Duration::from_secs(2));
         remaining_entries = db.remaining_count()?;
-        pb.set_position(total_entries - remaining_entries + 1);
+        let processed_entries = total_entries - remaining_entries;
+        let avg_entry_dur = loop_start.elapsed() / (processed_entries + 1).try_into().unwrap();
+        let eta = avg_entry_dur * remaining_entries.try_into().unwrap();
+
+        let msg = format!("ETA: {}", DurDuration::from(eta));
+        pb.set_message(msg);
+        pb.set_position(processed_entries);
     }
 
     // Wait for runners to work of the queue
