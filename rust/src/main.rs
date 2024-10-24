@@ -1,5 +1,6 @@
 mod args;
 mod db;
+mod multiwriter;
 mod runner;
 mod types;
 use crate::args::ARGS;
@@ -9,6 +10,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use log::LevelFilter;
 pub use log::{error, info, warn};
+use multiwriter::MultiWriter;
 use std::fs::{create_dir_all, remove_dir_all, File};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,14 +31,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .expect("Error setting Ctrl+C handler");
 
-    // File logging
-    fern::Dispatch::new()
-        .level(LevelFilter::Info)
-        .chain(File::create(&ARGS.log_file)?)
-        .apply()?;
+    let log_target = Box::new(MultiWriter::new(
+        std::io::stdout(),
+        File::create(&ARGS.log_file).expect("Can't create file"),
+    ));
 
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()
+        .target(env_logger::Target::Pipe(log_target))
+        // .target(env_logger::Target::Stdout)
         .filter(None, LevelFilter::Info) // Set default log level to Info
         .format_level(true)
         .format_timestamp_secs()

@@ -332,15 +332,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
-name = "fern"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ff9c9d5fb3e6da8ac2f77ab76fe7e8087d512ce095200f8f29ac5b656cf6dc"
-dependencies = [
- "log",
-]
-
-[[package]]
 name = "gen_coverage"
 version = "0.1.0"
 dependencies = [
@@ -348,7 +339,6 @@ dependencies = [
  "clap",
  "ctrlc",
  "env_logger",
- "fern",
  "glob",
  "indicatif",
  "indicatif-log-bridge",
