@@ -11,6 +11,15 @@ use std::collections::HashMap;
 use std::os::unix::fs::symlink;
 use std::process::Command;
 
+pub type GcovIRes = HashMap<
+    String,
+    (
+        HashMap<String, GcovFuncResult>,
+        HashMap<u32, GcovLineResult>,
+        HashMap<u32, GcovBranchResult>,
+    ),
+>;
+
 pub type GcovRes = HashMap<
     String,
     (
@@ -29,7 +38,7 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     .to_string();
     let pattern = format!("{}/**/*.gcda", prefix_dir);
 
-    let mut result: GcovRes = HashMap::new();
+    let mut ires: GcovIRes = HashMap::new();
     for entry in glob(&pattern).expect("Failed to read glob pattern") {
         if let Ok(gcda_file) = entry {
             if ARGS.individual_prefixes {
@@ -59,36 +68,77 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                 .expect("Could not interpret gcov output properly")
                 .iter_mut()
             {
-                if !result.contains_key(key) {
-                    result.insert(key.clone(), value.clone());
-                } else {
-                    let (funcs, lines, branches) = result.get_mut(key).unwrap();
+                if let Some((funcs, lines, branches)) = ires.get_mut(key) {
+                    // let (funcs, lines, branches) = ires.get_mut(key).unwrap();
+                    let (nfuncs, nlines, nbranches) = value;
                     if TRACK_FUNCS.clone() {
-                        funcs.append(&mut value.0);
+                        for (k, v) in nfuncs {
+                            if let Some(fv) = funcs.get_mut(k) {
+                                if ARGS.mode == CoverageMode::Full {
+                                    fv.usage += v.usage;
+                                }
+                            } else {
+                                funcs.insert(k.clone(), v.clone());
+                            }
+                        }
                     }
                     if TRACK_LINES.clone() {
-                        lines.append(&mut value.1);
+                        for (k, v) in nlines {
+                            if let Some(lv) = lines.get_mut(k) {
+                                if ARGS.mode == CoverageMode::Full {
+                                    lv.usage += v.usage;
+                                }
+                            } else {
+                                lines.insert(k.clone(), v.clone());
+                            }
+                        }
                     }
                     if TRACK_BRANCHES.clone() {
-                        branches.append(&mut value.2)
+                        for (k, v) in nbranches {
+                            if let Some(_) = branches.get_mut(k) {
+                                if ARGS.mode == CoverageMode::Full {
+                                    // FIXME: Uncomment this line as soon as branch support is a thing
+                                    // bv.usage += v.usage;
+                                    unreachable!();
+                                }
+                            } else {
+                                branches.insert(k.clone(), v.clone());
+                            }
+                        }
                     }
+                } else {
+                    ires.insert(key.clone(), value.clone());
                 }
             }
         }
     }
 
+    let result: GcovRes = ires
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                (
+                    value.0.values().cloned().collect(),
+                    value.1.values().cloned().collect(),
+                    value.2.values().cloned().collect(),
+                ),
+            )
+        })
+        .collect();
+
     return result;
 }
 
-fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
-    let mut result: GcovRes = HashMap::new();
+fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
+    let mut result: GcovIRes = HashMap::new();
 
     for file in &json.files {
         // Filter out libraries unless specified otherwise
         if !ARGS.no_ignore_libs && file.file.starts_with("/usr/include") {
             continue;
         }
-        let mut funcs: Vec<GcovFuncResult> = vec![];
+        let mut funcs: HashMap<String, GcovFuncResult> = HashMap::new();
         if TRACK_FUNCS.clone() {
             for function in &file.functions {
                 let usage = if ARGS.mode == CoverageMode::Full {
@@ -96,22 +146,26 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
                 } else {
                     (function.execution_count > 0) as u32
                 };
-                funcs.push(GcovFuncResult {
-                    name: function.demangled_name.clone(),
-                    start: FilePosition {
-                        line: function.start_line,
-                        col: function.start_column,
+                let name = function.demangled_name.clone();
+                funcs.insert(
+                    name.clone(),
+                    GcovFuncResult {
+                        name,
+                        start: FilePosition {
+                            line: function.start_line,
+                            col: function.start_column,
+                        },
+                        end: FilePosition {
+                            line: function.end_line,
+                            col: function.end_column,
+                        },
+                        usage,
                     },
-                    end: FilePosition {
-                        line: function.end_line,
-                        col: function.end_column,
-                    },
-                    usage,
-                });
+                );
             }
         }
 
-        let mut lines: Vec<GcovLineResult> = vec![];
+        let mut lines: HashMap<u32, GcovLineResult> = HashMap::new();
         if TRACK_LINES.clone() {
             for line in &file.lines {
                 let usage = if ARGS.mode == CoverageMode::Full {
@@ -119,14 +173,17 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
                 } else {
                     (line.count > 0) as u32
                 };
-                lines.push(GcovLineResult {
-                    line_no: line.line_number,
-                    usage,
-                });
+                lines.insert(
+                    line.line_number,
+                    GcovLineResult {
+                        line_no: line.line_number,
+                        usage,
+                    },
+                );
             }
         }
 
-        let branches: Vec<GcovBranchResult> = vec![];
+        let branches: HashMap<u32, GcovBranchResult> = HashMap::new();
         if TRACK_BRANCHES.clone() {
             // TODO: Add support for branch tracking
             unimplemented!("Branch tracking not yet supported")
@@ -138,13 +195,12 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     Ok(result)
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct GcovJson {
-    current_working_directory: String,
-    data_file: String,
-    format_version: String,
-    gcc_version: String,
+    // current_working_directory: String,
+    // data_file: String,
+    // format_version: String,
+    // gcc_version: String,
     files: Vec<FileElement>,
 }
 
@@ -155,30 +211,28 @@ struct FileElement {
     lines: Vec<LineElement>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct FunctionElement {
-    blocks: u32,
-    blocks_executed: u32,
+    // blocks: u32,
+    // blocks_executed: u32,
     demangled_name: String,
     end_column: u32,
     end_line: u32,
     execution_count: u32,
-    name: String,
+    // name: String,
     start_column: u32,
     start_line: u32,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct LineElement {
     line_number: u32,
     count: u32,
-    function_name: Option<String>, //TODO: Also incorporate this information into the DB
-    unexecuted_block: bool,
-    branches: Option<Vec<BranchElement>>,
-    calls: Option<Vec<CallElement>>,
-    conditions: Option<Vec<ConditionElement>>,
+    // function_name: Option<String>, //TODO: Also incorporate this information into the DB
+    // unexecuted_block: bool,
+    // branches: Option<Vec<BranchElement>>,
+    // calls: Option<Vec<CallElement>>,
+    // conditions: Option<Vec<ConditionElement>>,
 }
 
 #[allow(dead_code)]

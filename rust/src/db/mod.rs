@@ -171,14 +171,14 @@ impl<'a> Db<'a> {
                 let func_tx = conn.transaction()?;
                 {
                     let mut func_stmt = func_tx.prepare(
-                        "INSERT OR IGNORE INTO \"functions\" (
-                source_id,
-                name,
-                start_line,
-                start_col,
-                end_line,
-                end_col
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        "INSERT INTO \"functions\" (
+                            source_id,
+                            name,
+                            start_line,
+                            start_col,
+                            end_line,
+                            end_col
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     )?;
                     for (file, (funcs, _, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
@@ -227,10 +227,7 @@ impl<'a> Db<'a> {
                         bench_id,
                         func_id,
                         {0}
-                    ) VALUES (?1, ?2, ?3)
-                    ON CONFLICT (bench_id, func_id) DO 
-                    UPDATE SET {0} = {0} + excluded.{0}
-                    ",
+                    ) VALUES (?1, ?2, ?3)",
                         DB_USAGE_NAME.clone()
                     );
                     let mut funcusage_stmt = funcusage_tx.prepare(&funcusage_query)?;
@@ -261,7 +258,7 @@ impl<'a> Db<'a> {
                         "INSERT INTO \"lines\" (
                             source_id,
                             line_no
-                        ) VALUES (?1, ?2) ON CONFLICT (source_id, line_no) DO NOTHING",
+                        ) VALUES (?1, ?2)",
                     )?;
                     for (file, (_, lines, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
@@ -302,9 +299,7 @@ impl<'a> Db<'a> {
                             bench_id,
                             line_id,
                             {0}
-                        ) VALUES (?1, ?2, ?3)
-                        ON CONFLICT (bench_id, line_id) DO 
-                        UPDATE SET {0} = {0} + excluded.{0}",
+                        ) VALUES (?1, ?2, ?3)",
                         DB_USAGE_NAME.clone()
                     );
                     let mut lineusage_stmt = lineusage_tx.prepare(&lineusage_query)?;
