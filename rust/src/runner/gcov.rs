@@ -30,6 +30,8 @@ pub type GcovRes = HashMap<
     ),
 >;
 
+const CHUNK_SIZE: usize = 20;
+
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = match benchmark.prefix.clone() {
         None => ARGS.build_dir.clone(),
@@ -39,87 +41,137 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     .to_string();
     let pattern = format!("{}/**/*.gcda", prefix_dir);
 
+    let mut files = vec![];
+    for f in glob(&pattern).expect("Failed to read glob pattern") {
+        if let Ok(gcda_file) = f {
+            files.push(gcda_file)
+        }
+    }
+
     let mut ires: GcovIRes = HashMap::new();
-    for entry in glob(&pattern).expect("Failed to read glob pattern") {
-        if let Ok(gcda_file) = entry {
-            let gcno_symlink = if ARGS.individual_prefixes {
+    for gcda_chunk in files.chunks(CHUNK_SIZE) {
+        let mut gcno_symlinks = vec![];
+        for gcda_file in gcda_chunk {
+            if ARGS.individual_prefixes {
                 let gcno_file_dst = gcda_file.to_str().unwrap();
                 let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
                 let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
                 symlink(&gcno_file_src, &gcno_file_dst).unwrap_or(());
-                Some(gcno_file_dst)
-            } else {
-                None
-            };
-
-            let args = ["--json", "--stdout", gcda_file.to_str().unwrap()];
-            let output = Command::new("gcov")
-                .args(&args)
-                .output()
-                .expect("Could not capture output of gcov...");
-            let stderr = String::from_utf8(output.stderr).unwrap();
-            if !output.status.success() {
-                error!(
-                    "Gcov failed with error!\n GCDA File: {:?} \n ERROR: {:?}",
-                    &gcda_file, stderr
-                );
-                continue;
+                gcno_symlinks.push(gcno_file_dst);
             }
-            let gcov_json: GcovJson =
-                serde_json::from_slice(&output.stdout).expect("Error parsing gcov json output");
+        }
 
-            for (key, value) in interpret_gcov(&gcov_json)
-                .expect("Could not interpret gcov output properly")
-                .iter_mut()
-            {
-                if let Some((funcs, lines, branches)) = ires.get_mut(key) {
-                    // let (funcs, lines, branches) = ires.get_mut(key).unwrap();
-                    let (nfuncs, nlines, nbranches) = value;
-                    if TRACK_FUNCS.clone() {
-                        for (k, v) in nfuncs {
-                            if let Some(fv) = funcs.get_mut(k) {
-                                if ARGS.mode == CoverageMode::Full {
-                                    fv.usage += v.usage;
-                                }
-                            } else {
-                                funcs.insert(k.clone(), v.clone());
+        let chunk_args: Vec<&str> = gcda_chunk.iter().map(|p| p.to_str().unwrap()).collect();
+        let args = ["--json", "--stdout"]; // gcda_file.to_str().unwrap()];
+        let output = Command::new("gcov")
+            .args(&args)
+            .args(&chunk_args)
+            .output()
+            .expect("Could not capture output of gcov...");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        if !output.status.success() {
+            error!(
+                "Gcov failed with error!\n GCDA Files: {:?} \n ERROR: {:?}",
+                &gcda_chunk, stderr
+            );
+            continue;
+        }
+        let gcov_json: GcovJson =
+            serde_json::from_slice(&output.stdout).expect("Error parsing gcov json output");
+
+        for (key, value) in interpret_gcov(&gcov_json)
+            .expect("Could not interpret gcov output properly")
+            .iter_mut()
+        {
+            if let Some((funcs, lines, branches)) = ires.get_mut(key) {
+                let (nfuncs, nlines, nbranches) = value;
+                // if TRACK_FUNCS.clone() {
+                //     for (k, v) in nfuncs {
+                //         funcs
+                //             .entry(k)
+                //             .and_modify(|e| {
+                //                 if ARGS.mode == CoverageMode::Full {
+                //                     e.usage += v.usage;
+                //                 }
+                //             })
+                //             .or_insert(v);
+                //     }
+                // }
+
+                // if TRACK_LINES {
+                //     for (k, v) in nlines {
+                //         lines
+                //             .entry(k)
+                //             .and_modify(|e| {
+                //                 if ARGS.mode == CoverageMode::Full {
+                //                     e.usage += v.usage;
+                //                 }
+                //             })
+                //             .or_insert(v);
+                //     }
+                // }
+
+                // if TRACK_BRANCHES {
+                //     for (k, v) in nbranches {
+                //         branches
+                //             .entry(k)
+                //             .and_modify(|e| {
+                //                 if ARGS.mode == CoverageMode::Full {
+                //                     // e.usage += v.usage;
+                //                     unreachable!();
+                //                 }
+                //             })
+                //             .or_insert(v);
+                //     }
+                // }
+
+                // let (funcs, lines, branches) = ires.get_mut(key).unwrap();
+                if TRACK_FUNCS.clone() {
+                    for (k, v) in nfuncs {
+                        if let Some(fv) = funcs.get_mut(k) {
+                            if ARGS.mode == CoverageMode::Full {
+                                fv.usage += v.usage;
                             }
+                        } else {
+                            funcs.insert(k.clone(), v.clone());
                         }
                     }
-                    if TRACK_LINES.clone() {
-                        for (k, v) in nlines {
-                            if let Some(lv) = lines.get_mut(k) {
-                                if ARGS.mode == CoverageMode::Full {
-                                    lv.usage += v.usage;
-                                }
-                            } else {
-                                lines.insert(k.clone(), v.clone());
-                            }
-                        }
-                    }
-                    if TRACK_BRANCHES.clone() {
-                        for (k, v) in nbranches {
-                            if let Some(_) = branches.get_mut(k) {
-                                if ARGS.mode == CoverageMode::Full {
-                                    // FIXME: Uncomment this line as soon as branch support is a thing
-                                    // bv.usage += v.usage;
-                                    unreachable!();
-                                }
-                            } else {
-                                branches.insert(k.clone(), v.clone());
-                            }
-                        }
-                    }
-                } else {
-                    ires.insert(key.clone(), value.clone());
                 }
+                if TRACK_LINES.clone() {
+                    for (k, v) in nlines {
+                        if let Some(lv) = lines.get_mut(k) {
+                            if ARGS.mode == CoverageMode::Full {
+                                lv.usage += v.usage;
+                            }
+                        } else {
+                            lines.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                if TRACK_BRANCHES.clone() {
+                    for (k, v) in nbranches {
+                        if let Some(_) = branches.get_mut(k) {
+                            if ARGS.mode == CoverageMode::Full {
+                                // FIXME: Uncomment this line as soon as branch support is a thing
+                                // bv.usage += v.usage;
+                                unreachable!();
+                            }
+                        } else {
+                            branches.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            } else {
+                ires.insert(key.clone(), value.clone());
             }
+        }
 
-            // Delete the gcda file gcno file if it was symlinked
+        // Delete the gcda file gcno file if it was symlinked
+        for gcda_file in gcda_chunk {
             remove_file(gcda_file).unwrap();
-            if let Some(file) = gcno_symlink {
-                remove_file(file).unwrap();
-            }
+        }
+        for gcno_symlink in gcno_symlinks {
+            remove_file(gcno_symlink).unwrap();
         }
     }
 

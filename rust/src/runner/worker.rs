@@ -39,7 +39,7 @@ impl Worker {
                         let start = Instant::now();
                         let cvc5_result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
                         let res_exit = cvc5_result.exit_code;
-                        info!(
+                        debug!(
                             "[Worker {}] Ran cvc5 in {}ms (bench_id: {})",
                             id,
                             start.elapsed().as_millis(),
@@ -51,7 +51,7 @@ impl Worker {
                         if res_exit == 0 {
                             let start = Instant::now();
                             let gcov_result = gcov::process(&benchmark);
-                            info!(
+                            debug!(
                                 "[Worker {}] Processed & ran gcov in {}ms (bench_id: {})",
                                 id,
                                 start.elapsed().as_millis(),
@@ -63,7 +63,7 @@ impl Worker {
                                 Some(gcov_result),
                             )) {
                                 Ok(_) => {
-                                    info!(
+                                    debug!(
                                         "[Worker {}] Queued GCOV result (bench_id: {})",
                                         id, bench_id
                                     );
@@ -80,7 +80,7 @@ impl Worker {
                                 None,
                             )) {
                                 Ok(_) => {
-                                    info!(
+                                    debug!(
                                         "[Worker {}] Queued GCOV result (bench_id: {})",
                                         id, bench_id
                                     );
@@ -152,8 +152,9 @@ impl Worker {
                             .expect("Could not update benchmark status");
                     }
                     Ok(ProcessingQueueMessage::Result(benchmark, cvc5_result, gcov_result)) => {
+                        info!("[DB Writer] Received a result (bench_id: {})", benchmark.id);
                         let start = Instant::now();
-                        info!(
+                        debug!(
                             "[DB Writer] Received cvc5 result (bench_id: {})",
                             benchmark.id
                         );
@@ -168,14 +169,14 @@ impl Worker {
                             },
                         )
                         .unwrap();
-                        info!(
+                        debug!(
                             "[DB Writer] Processed cvc5 result in {}ms (bench_id: {})",
                             start.elapsed().as_millis(),
                             benchmark.id
                         );
                         if let Some(gcov_result) = gcov_result {
                             let start = Instant::now();
-                            info!(
+                            debug!(
                                 "[DB Writer] Received GCOV result (bench_id: {})",
                                 benchmark.id
                             );
@@ -183,13 +184,13 @@ impl Worker {
                                 .expect("Could not add gcov measurement");
                             db.update_benchmark_status(benchmark.id, Status::Done)
                                 .expect("Could not update bench status");
-                            info!(
+                            debug!(
                                 "[DB Writer] Processed GCOV result in {}ms (bench_id: {})",
                                 start.elapsed().as_millis(),
                                 benchmark.id
                             );
                         } else {
-                            info!("[DB Writer] No GCOV result (bench_id: {})", benchmark.id);
+                            debug!("[DB Writer] No GCOV result (bench_id: {})", benchmark.id);
                         }
                     }
                     Ok(ProcessingQueueMessage::Stop) => {

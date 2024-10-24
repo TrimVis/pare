@@ -44,8 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(log_target))
-        // .target(env_logger::Target::Stdout)
-        .filter(None, LevelFilter::Trace) // Set default log level to Info
+        .filter(None, LevelFilter::Debug) // Set default log level to Info
         .format_level(true)
         .format_timestamp_secs()
         .build();
