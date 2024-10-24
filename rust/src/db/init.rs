@@ -1,4 +1,4 @@
-use crate::args::{DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::types::Status;
 use crate::{ResultT, ARGS};
 
@@ -88,16 +88,27 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
         conn.execute(&func_table, [])
             .expect("Issue during functions table creation");
         // Stores the function usage
-        let func_usage_table = format!(
-            "CREATE TABLE IF NOT EXISTS \"usage_functions\" (
+        let func_usage_table = if ARGS.mode == CoverageMode::Full {
+            format!(
+                "CREATE TABLE IF NOT EXISTS \"usage_functions\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 func_id INTEGER NOT NULL,
                 {} INTEGER NOT NULL,
                 UNIQUE(func_id, bench_id)
             )",
-            DB_USAGE_NAME.clone()
-        );
+                DB_USAGE_NAME.clone()
+            )
+        } else {
+            format!(
+                "CREATE TABLE IF NOT EXISTS \"usage_functions\" (
+                id INTEGER PRIMARY KEY,
+                func_id INTEGER NOT NULL UNIQUE,
+                {} INTEGER NOT NULL
+            )",
+                DB_USAGE_NAME.clone()
+            )
+        };
         conn.execute(&func_usage_table, [])
             .expect("Issue during usage_functions table creation");
     }
@@ -114,16 +125,27 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
             .expect("Issue during lines table creation");
 
         // Stores the line usage
-        let line_usage_table = format!(
-            "CREATE TABLE IF NOT EXISTS \"usage_lines\" (
+        let line_usage_table = if ARGS.mode == CoverageMode::Full {
+            format!(
+                "CREATE TABLE IF NOT EXISTS \"usage_lines\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 line_id INTEGER NOT NULL,
                 {} INTEGER NOT NULL,
                 UNIQUE(line_id, bench_id)
             )",
-            DB_USAGE_NAME.clone()
-        );
+                DB_USAGE_NAME.clone()
+            )
+        } else {
+            format!(
+                "CREATE TABLE IF NOT EXISTS \"usage_lines\" (
+                id INTEGER PRIMARY KEY,
+                line_id INTEGER NOT NULL UNIQUE,
+                {} INTEGER NOT NULL
+            )",
+                DB_USAGE_NAME.clone()
+            )
+        };
         conn.execute(&line_usage_table, [])
             .expect("Issue during usage_lines table creation");
     }
@@ -139,16 +161,27 @@ pub(super) fn create_tables(conn: &RefCell<Connection>) -> ResultT<()> {
         conn.execute(&branch_table, [])
             .expect("Issue during branches table creation");
         // Stores the branch usage
-        let branch_usage_table = format!(
-            "CREATE TABLE IF NOT EXISTS \"usage_branches\" (
+        let branch_usage_table = if ARGS.mode == CoverageMode::Full {
+            format!(
+                "CREATE TABLE IF NOT EXISTS \"usage_branches\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 branch_id INTEGER NOT NULL,
                 {} INTEGER NOT NULL,
                 UNIQUE(branch_id, bench_id)
             )",
-            DB_USAGE_NAME.clone()
-        );
+                DB_USAGE_NAME.clone()
+            )
+        } else {
+            format!(
+                "CREATE TABLE IF NOT EXISTS \"usage_branches\" (
+                id INTEGER PRIMARY KEY,
+                branch_id INTEGER NOT NULL UNIQUE,
+                {} INTEGER NOT NULL
+            )",
+                DB_USAGE_NAME.clone()
+            )
+        };
         conn.execute(&branch_usage_table, [])
             .expect("Issue during usage_branches table creation");
     }

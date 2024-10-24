@@ -1,6 +1,6 @@
 mod init;
 mod stmts;
-use crate::args::{DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::GcovRes;
 use crate::types::{Benchmark, BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
@@ -222,14 +222,24 @@ impl<'a> Db<'a> {
                 let mut conn = self.conn.borrow_mut();
                 let funcusage_tx = conn.transaction()?;
                 {
-                    let funcusage_query = format!(
-                        "INSERT INTO \"usage_functions\" (
-                        bench_id,
-                        func_id,
-                        {0}
-                    ) VALUES (?1, ?2, ?3)",
-                        DB_USAGE_NAME.clone()
-                    );
+                    let funcusage_query = if ARGS.mode == CoverageMode::Full {
+                        format!(
+                            "INSERT INTO \"usage_functions\" (
+                                bench_id,
+                                func_id,
+                                {0}
+                            ) VALUES (?1, ?2, ?3)",
+                            DB_USAGE_NAME.clone()
+                        )
+                    } else {
+                        format!(
+                            "INSERT INTO \"usage_functions\" (
+                                func_id,
+                                {0}
+                            ) VALUES (?2, ?3)",
+                            DB_USAGE_NAME.clone()
+                        )
+                    };
                     let mut funcusage_stmt = funcusage_tx.prepare(&funcusage_query)?;
                     for (file, (funcs, _, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
@@ -294,14 +304,24 @@ impl<'a> Db<'a> {
                 let mut conn = self.conn.borrow_mut();
                 let lineusage_tx = conn.transaction()?;
                 {
-                    let lineusage_query = format!(
-                        "INSERT INTO \"usage_lines\" (
+                    let lineusage_query = if ARGS.mode == CoverageMode::Full {
+                        format!(
+                            "INSERT INTO \"usage_lines\" (
                             bench_id,
                             line_id,
                             {0}
                         ) VALUES (?1, ?2, ?3)",
-                        DB_USAGE_NAME.clone()
-                    );
+                            DB_USAGE_NAME.clone()
+                        )
+                    } else {
+                        format!(
+                            "INSERT INTO \"usage_lines\" (
+                            line_id,
+                            {0}
+                        ) VALUES (?2, ?3)",
+                            DB_USAGE_NAME.clone()
+                        )
+                    };
                     let mut lineusage_stmt = lineusage_tx.prepare(&lineusage_query)?;
                     for (file, (_, lines, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
