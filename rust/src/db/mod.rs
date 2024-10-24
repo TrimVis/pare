@@ -8,6 +8,8 @@ use log::info;
 use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 const MEMORY_CONN_URI: &str = "file::memory:?cache=shared";
 
@@ -263,7 +265,7 @@ impl DbWriter {
             src_tx.commit()?;
         }
 
-        let mut srcid_file_map: HashMap<String, u64>;
+        let mut srcid_file_map: HashMap<Arc<String>, u64>;
         {
             let mut stmt = self
                 .conn
@@ -276,7 +278,7 @@ impl DbWriter {
             srcid_file_map = HashMap::with_capacity(rows.size_hint().0);
             for row in rows {
                 let (file, id) = row?;
-                srcid_file_map.insert(file, id);
+                srcid_file_map.insert(Arc::from(file), id);
             }
         }
 
@@ -298,7 +300,7 @@ impl DbWriter {
                     for (file, (funcs, _, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
                         for func in funcs {
-                            if func.usage == 0 {
+                            if func.usage.load(Ordering::SeqCst) == 0 {
                                 continue;
                             }
                             func_stmt.execute(params![
@@ -359,12 +361,16 @@ impl DbWriter {
                     for (file, (funcs, _, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
                         for func in funcs {
-                            if func.usage == 0 {
+                            if func.usage.load(Ordering::SeqCst) == 0 {
                                 continue;
                             }
                             let funcid = id_fname_map.get(&(*sid, func.name.to_string())).unwrap();
 
-                            funcusage_stmt.execute(params![bench_id, *funcid, func.usage])?;
+                            funcusage_stmt.execute(params![
+                                bench_id,
+                                *funcid,
+                                func.usage.load(Ordering::SeqCst)
+                            ])?;
                         }
                     }
                 }
@@ -387,7 +393,7 @@ impl DbWriter {
                     for (file, (_, lines, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
                         for line in lines {
-                            if line.usage == 0 {
+                            if line.usage.load(Ordering::SeqCst) == 0 {
                                 continue;
                             }
                             line_stmt.execute(params![*sid, line.line_no])?;
@@ -440,11 +446,15 @@ impl DbWriter {
                     for (file, (_, lines, _)) in &run_result {
                         let sid = srcid_file_map.get(file).unwrap();
                         for line in lines {
-                            if line.usage == 0 {
+                            if line.usage.load(Ordering::SeqCst) == 0 {
                                 continue;
                             }
                             let lineid = id_line_map.get(&(*sid, line.line_no.into())).unwrap();
-                            lineusage_stmt.execute(params![bench_id, *lineid, line.usage])?;
+                            lineusage_stmt.execute(params![
+                                bench_id,
+                                *lineid,
+                                line.usage.load(Ordering::SeqCst)
+                            ])?;
                         }
                     }
                 }

@@ -11,27 +11,28 @@ use std::collections::HashMap;
 use std::fs::remove_file;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
-use std::process::{exit, Command};
+use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 pub type GcovIRes = HashMap<
-    String,
+    Arc<String>,
     (
-        HashMap<String, GcovFuncResult>,
-        HashMap<u32, GcovLineResult>,
-        HashMap<u32, GcovBranchResult>,
+        HashMap<Arc<String>, Arc<GcovFuncResult>>,
+        HashMap<u32, Arc<GcovLineResult>>,
+        HashMap<u32, Arc<GcovBranchResult>>,
     ),
 >;
 
 pub type GcovRes = HashMap<
-    String,
+    Arc<String>,
     (
-        Vec<GcovFuncResult>,
-        Vec<GcovLineResult>,
-        Vec<GcovBranchResult>,
+        Vec<Arc<GcovFuncResult>>,
+        Vec<Arc<GcovLineResult>>,
+        Vec<Arc<GcovBranchResult>>,
     ),
 >;
 
-// FIXME: Values larger than 1 cause a json parsing panic
 const CHUNK_SIZE: usize = 20;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
@@ -90,89 +91,55 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
 
                     for (key, value) in interpret_gcov(&gcov_json)
                         .expect("Could not interpret gcov output properly")
-                        .iter_mut()
                     {
-                        if let Some((funcs, lines, branches)) = ires.get_mut(key) {
-                            let (nfuncs, nlines, nbranches) = value;
-                            // if TRACK_FUNCS.clone() {
-                            //     for (k, v) in nfuncs {
-                            //         funcs
-                            //             .entry(k)
-                            //             .and_modify(|e| {
-                            //                 if ARGS.mode == CoverageMode::Full {
-                            //                     e.usage += v.usage;
-                            //                 }
-                            //             })
-                            //             .or_insert(v);
-                            //     }
-                            // }
-
-                            // if TRACK_LINES {
-                            //     for (k, v) in nlines {
-                            //         lines
-                            //             .entry(k)
-                            //             .and_modify(|e| {
-                            //                 if ARGS.mode == CoverageMode::Full {
-                            //                     e.usage += v.usage;
-                            //                 }
-                            //             })
-                            //             .or_insert(v);
-                            //     }
-                            // }
-
-                            // if TRACK_BRANCHES {
-                            //     for (k, v) in nbranches {
-                            //         branches
-                            //             .entry(k)
-                            //             .and_modify(|e| {
-                            //                 if ARGS.mode == CoverageMode::Full {
-                            //                     // e.usage += v.usage;
-                            //                     unreachable!();
-                            //                 }
-                            //             })
-                            //             .or_insert(v);
-                            //     }
-                            // }
-
-                            // let (funcs, lines, branches) = ires.get_mut(key).unwrap();
-                            if TRACK_FUNCS.clone() {
-                                for (k, v) in nfuncs {
-                                    if let Some(fv) = funcs.get_mut(k) {
-                                        if ARGS.mode == CoverageMode::Full {
-                                            fv.usage += v.usage;
-                                        }
-                                    } else {
-                                        funcs.insert(k.clone(), v.clone());
+                        ires.entry(key)
+                            .and_modify(|pvalue| {
+                                if TRACK_FUNCS.clone() {
+                                    for (k, v) in &value.0 {
+                                        pvalue
+                                            .0
+                                            .entry(Arc::clone(k))
+                                            .and_modify(|e| {
+                                                if ARGS.mode == CoverageMode::Full {
+                                                    // e.usage += v.usage;
+                                                    let v_usage = v.usage.load(Ordering::SeqCst);
+                                                    e.usage.fetch_add(v_usage, Ordering::SeqCst);
+                                                }
+                                            })
+                                            .or_insert(Arc::clone(v));
                                     }
                                 }
-                            }
-                            if TRACK_LINES.clone() {
-                                for (k, v) in nlines {
-                                    if let Some(lv) = lines.get_mut(k) {
-                                        if ARGS.mode == CoverageMode::Full {
-                                            lv.usage += v.usage;
-                                        }
-                                    } else {
-                                        lines.insert(k.clone(), v.clone());
+
+                                if TRACK_LINES.clone() {
+                                    for (k, v) in &value.1 {
+                                        pvalue
+                                            .1
+                                            .entry(*k)
+                                            .and_modify(|e| {
+                                                if ARGS.mode == CoverageMode::Full {
+                                                    let v_usage = v.usage.load(Ordering::SeqCst);
+                                                    e.usage.fetch_add(v_usage, Ordering::SeqCst);
+                                                }
+                                            })
+                                            .or_insert(Arc::clone(v));
                                     }
                                 }
-                            }
-                            if TRACK_BRANCHES.clone() {
-                                for (k, v) in nbranches {
-                                    if let Some(_) = branches.get_mut(k) {
-                                        if ARGS.mode == CoverageMode::Full {
-                                            // FIXME: Uncomment this line as soon as branch support is a thing
-                                            // bv.usage += v.usage;
-                                            unreachable!();
-                                        }
-                                    } else {
-                                        branches.insert(k.clone(), v.clone());
-                                    }
+
+                                if TRACK_BRANCHES.clone() {
+                                    unreachable!();
+                                    // for (k, v) in value.2 {
+                                    //     pvalue
+                                    //         .2
+                                    //         .entry(k)
+                                    //         .and_modify(|_e| {
+                                    //             if ARGS.mode == CoverageMode::Full {
+                                    //             }
+                                    //         })
+                                    //         .or_insert(v);
+                                    // }
                                 }
-                            }
-                        } else {
-                            ires.insert(key.clone(), value.clone());
-                        }
+                            })
+                            .or_insert(value);
                     }
                 }
                 Err(_) => error!("An error occurred while reading the output lines of gcov"),
@@ -188,11 +155,17 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
     }
 
+    // let result: GcovRes = HashMap::new();
+    // for (key, value) in ires {
+    //     let funcs = value.0.into_values();
+    //     result.insert(key, (funcs, ))
+    // }
+    //
     let result: GcovRes = ires
         .iter()
         .map(|(key, value)| {
             (
-                key.clone(),
+                Arc::clone(key),
                 (
                     value.0.values().cloned().collect(),
                     value.1.values().cloned().collect(),
@@ -201,6 +174,19 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
             )
         })
         .collect();
+    // let result: GcovRes = ires
+    //     .iter()
+    //     .map(|(key, value)| {
+    //         (
+    //             key.clone(),
+    //             (
+    //                 value.0.into_values().collect(),
+    //                 value.1.into_values().collect(),
+    //                 value.2.into_values().collect(),
+    //             ),
+    //         )
+    //     })
+    //     .collect();
 
     return result;
 }
@@ -213,7 +199,7 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
         if !ARGS.no_ignore_libs && file.file.starts_with("/usr/include") {
             continue;
         }
-        let mut funcs: HashMap<String, GcovFuncResult> = HashMap::new();
+        let mut funcs: HashMap<Arc<String>, Arc<GcovFuncResult>> = HashMap::new();
         if TRACK_FUNCS.clone() {
             for function in &file.functions {
                 let usage = if ARGS.mode == CoverageMode::Full {
@@ -223,8 +209,8 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
                 };
                 let name = function.demangled_name.clone();
                 funcs.insert(
-                    name.clone(),
-                    GcovFuncResult {
+                    Arc::from(name.clone()),
+                    Arc::from(GcovFuncResult {
                         name,
                         start: FilePosition {
                             line: function.start_line,
@@ -234,13 +220,13 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
                             line: function.end_line,
                             col: function.end_column,
                         },
-                        usage,
-                    },
+                        usage: AtomicU32::from(usage),
+                    }),
                 );
             }
         }
 
-        let mut lines: HashMap<u32, GcovLineResult> = HashMap::new();
+        let mut lines: HashMap<u32, Arc<GcovLineResult>> = HashMap::new();
         if TRACK_LINES.clone() {
             for line in &file.lines {
                 let usage = if ARGS.mode == CoverageMode::Full {
@@ -250,21 +236,21 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
                 };
                 lines.insert(
                     line.line_number,
-                    GcovLineResult {
+                    Arc::from(GcovLineResult {
                         line_no: line.line_number,
-                        usage,
-                    },
+                        usage: AtomicU32::from(usage),
+                    }),
                 );
             }
         }
 
-        let branches: HashMap<u32, GcovBranchResult> = HashMap::new();
+        let branches: HashMap<u32, Arc<GcovBranchResult>> = HashMap::new();
         if TRACK_BRANCHES.clone() {
             // TODO: Add support for branch tracking
             unimplemented!("Branch tracking not yet supported")
         }
 
-        result.insert(file.file.clone(), (funcs, lines, branches));
+        result.insert(Arc::from(file.file.clone()), (funcs, lines, branches));
     }
 
     Ok(result)

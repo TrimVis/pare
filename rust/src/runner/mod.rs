@@ -39,7 +39,7 @@ impl Runner {
         assert!(no_workers > 0);
 
         let (p_ready_send, p_ready_receiver) = channel::bounded(1);
-        let (p_sender, p_receiver) = channel::bounded(ARGS.job_size);
+        let (p_sender, p_receiver) = channel::bounded(10 * ARGS.job_size);
         let processing_queue = p_sender;
         let processing_worker =
             worker::Worker::new_processing(p_ready_send.clone(), p_receiver.clone());

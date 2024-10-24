@@ -68,18 +68,20 @@ pub struct Cvc5BenchmarkRun {
     pub stderr: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+use std::sync::atomic::AtomicU32;
+
+#[derive(Debug)]
 pub struct GcovFuncResult {
     pub name: String,
     pub start: FilePosition,
     pub end: FilePosition,
-    pub usage: u32,
+    pub usage: AtomicU32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GcovLineResult {
     pub line_no: u32,
-    pub usage: u32,
+    pub usage: AtomicU32,
 }
 
 #[derive(Debug, Clone)]
