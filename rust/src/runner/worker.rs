@@ -32,21 +32,12 @@ impl Worker {
 
                 let job = receiver.lock().unwrap().recv();
                 match job {
-                    Ok(RunnerQueueMessage::Cvc5Cmd(benchmark)) => {
-                        info!(
-                            "[Worker {}] Received cvc5 job (bench_id: {})",
-                            id, benchmark.id
-                        );
+                    Ok(RunnerQueueMessage::Start(benchmark)) => {
+                        info!("[Worker {}] Received job (bench_id: {})", id, benchmark.id);
                         let result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
                         processing_queue
-                            .send(ProcessingQueueMessage::Cvc5Res(benchmark, result))
+                            .send(ProcessingQueueMessage::Cvc5Res(benchmark.clone(), result))
                             .unwrap();
-                    }
-                    Ok(RunnerQueueMessage::GcovCmd(benchmark)) => {
-                        info!(
-                            "[Worker {}] Received GCOV job (bench_id: {})",
-                            id, benchmark.id
-                        );
 
                         let result = gcov::process(&benchmark);
                         processing_queue
@@ -104,8 +95,8 @@ impl Worker {
             loop {
                 let job = receiver.recv();
                 match job {
-                    Ok(ProcessingQueueMessage::Cvc5Start(benchmark_id)) => {
-                        db.update_benchmark_status(benchmark_id, Status::Running)
+                    Ok(ProcessingQueueMessage::Start(benchmark)) => {
+                        db.update_benchmark_status(benchmark.id, Status::Running)
                             .expect("Could not update benchmark status");
                     }
                     Ok(ProcessingQueueMessage::Cvc5Res(benchmark, result)) => {
@@ -114,12 +105,8 @@ impl Worker {
                             benchmark.id
                         );
                         db.add_cvc5_run_result(result).unwrap();
-                        db.update_benchmark_status(benchmark.id, Status::WaitingProcessing)
+                        db.update_benchmark_status(benchmark.id, Status::Processing)
                             .unwrap();
-                    }
-                    Ok(ProcessingQueueMessage::GcovStart(benchmark_id)) => {
-                        db.update_benchmark_status(benchmark_id, Status::Processing)
-                            .expect("Could not update benchmark status");
                     }
                     Ok(ProcessingQueueMessage::GcovRes(benchmark, result)) => {
                         info!(
@@ -140,6 +127,9 @@ impl Worker {
                     }
                 }
             }
+
+            db.write_to_disk()
+                .expect("Issue while writing result db to disk");
             warn!("[DB Writer] Terminated.");
         });
 

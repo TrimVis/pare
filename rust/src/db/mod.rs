@@ -25,34 +25,9 @@ impl DbReader {
         Ok(DbReader { conn })
     }
 
-    pub fn write_to_disk(&self) -> ResultT<()> {
-        let query = format!("VACUUM INTO '{}'", ARGS.result_db.display());
-        self.conn.execute(&query, params![])?;
-        Ok(())
-    }
-
-    pub fn retrieve_benchmarks_waiting_for_processing(
-        &mut self,
-        limit: usize,
-    ) -> ResultT<Vec<Benchmark>> {
-        // NOTE pjordan: This strategy does not really work
-        let enqueued = self
-            .retrieve_bench_of_status(Status::Processing, limit)?
-            .len();
-        self.retrieve_bench_of_status(Status::WaitingProcessing, limit - enqueued)
-        // self.retrieve_bench_of_status(Status::WaitingProcessing, limit)
-    }
-
-    pub fn retrieve_benchmarks_waiting_for_cvc5(
-        &mut self,
-        limit: usize,
-    ) -> ResultT<Vec<Benchmark>> {
-        // NOTE pjordan: This strategy does not really work
-        let enqueued = self
-            .retrieve_bench_of_status(Status::Processing, limit)?
-            .len();
+    pub fn retrieve_benchmarks_waiting(&mut self, limit: usize) -> ResultT<Vec<Benchmark>> {
+        let enqueued = self.retrieve_bench_of_status(Status::Running, limit)?.len();
         self.retrieve_bench_of_status(Status::Waiting, limit - enqueued)
-        // self.retrieve_bench_of_status(Status::Waiting, limit)
     }
 
     fn retrieve_bench_of_status(

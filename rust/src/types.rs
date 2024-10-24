@@ -5,7 +5,6 @@ pub type ResultT<T> = Result<T, Box<dyn std::error::Error>>;
 pub enum Status {
     Waiting,
     Running,
-    WaitingProcessing,
     Processing,
     Done,
 }
@@ -54,7 +53,7 @@ pub struct LineBenchUsage {
     pub usage: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Benchmark {
     pub id: u64,
     pub path: PathBuf,

@@ -79,16 +79,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
 
-        // We enqueu per iteration in this loop, to ensure that not all gcov results are processed
-        // at once
-        let gcov_runs = db.retrieve_benchmarks_waiting_for_processing(ARGS.job_size)?;
-        for r in gcov_runs {
-            runner.enqueue_gcov(r);
-        }
-
-        let cvc5_runs = db.retrieve_benchmarks_waiting_for_cvc5(ARGS.job_size)?;
-        for r in cvc5_runs {
-            runner.enqueue_cvc5(r);
+        let benchmarks = db.retrieve_benchmarks_waiting(10 * ARGS.job_size)?;
+        for r in benchmarks {
+            runner.enqueue(r);
         }
 
         thread::sleep(Duration::from_secs(2));
@@ -104,8 +97,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Wait for runners to work of the queue
     runner.join();
-
-    db.write_to_disk()?;
 
     // Remove the tmp directory
     remove_dir_all(ARGS.tmp_dir.clone().unwrap())?;

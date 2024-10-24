@@ -11,14 +11,12 @@ use std::process::exit;
 use std::sync::{mpsc, Arc, Mutex};
 
 enum RunnerQueueMessage {
-    Cvc5Cmd(Benchmark),
-    GcovCmd(Benchmark),
+    Start(Benchmark),
     Stop,
 }
 
 enum ProcessingQueueMessage {
-    Cvc5Start(u64),
-    GcovStart(u64),
+    Start(Benchmark),
     Cvc5Res(Benchmark, BenchmarkRun),
     GcovRes(Benchmark, GcovRes),
     Stop,
@@ -32,8 +30,7 @@ pub struct Runner {
     processing_worker: worker::Worker,
     processing_queue: mpsc::Sender<ProcessingQueueMessage>,
 
-    cvc5_enqueued: Box<HashSet<u64>>,
-    gcov_enqueued: Box<HashSet<u64>>,
+    enqueued: Box<HashSet<u64>>,
 }
 
 impl Runner {
@@ -68,8 +65,7 @@ impl Runner {
             processing_worker,
             processing_queue,
 
-            cvc5_enqueued: Box::from(HashSet::new()),
-            gcov_enqueued: Box::from(HashSet::new()),
+            enqueued: Box::from(HashSet::new()),
         }
     }
 
@@ -80,30 +76,16 @@ impl Runner {
         }
     }
 
-    pub fn enqueue_gcov(&mut self, benchmark: Benchmark) {
+    pub fn enqueue(&mut self, benchmark: Benchmark) {
         // Safety guard, if DB worker falls behind it happens that
         // we try to enqueue entries multiple times
-        if !self.gcov_enqueued.contains(&benchmark.id) {
-            self.gcov_enqueued.insert(benchmark.id);
+        if !self.enqueued.contains(&benchmark.id) {
+            self.enqueued.insert(benchmark.id);
             self.processing_queue
-                .send(ProcessingQueueMessage::GcovStart(benchmark.id))
+                .send(ProcessingQueueMessage::Start(benchmark.clone()))
                 .unwrap();
             self.runner_queue
-                .send(RunnerQueueMessage::GcovCmd(benchmark))
-                .unwrap();
-        }
-    }
-
-    pub fn enqueue_cvc5(&mut self, benchmark: Benchmark) {
-        // Safety guard, if DB worker falls behind it happens that
-        // we try to enqueue entries multiple times
-        if !self.cvc5_enqueued.contains(&benchmark.id) {
-            self.cvc5_enqueued.insert(benchmark.id);
-            self.processing_queue
-                .send(ProcessingQueueMessage::Cvc5Start(benchmark.id))
-                .unwrap();
-            self.runner_queue
-                .send(RunnerQueueMessage::Cvc5Cmd(benchmark))
+                .send(RunnerQueueMessage::Start(benchmark))
                 .unwrap();
         }
     }
