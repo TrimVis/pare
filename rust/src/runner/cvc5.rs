@@ -1,4 +1,4 @@
-use crate::types::{Benchmark, BenchmarkRun};
+use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
 
 use log::error;
@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<BenchmarkRun> {
+pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Cvc5BenchmarkRun> {
     let cmd = &mut Command::new(cvc5cmd);
     if let Some(prefix) = &benchmark.prefix {
         cmd.env("GCOV_PREFIX", prefix.display().to_string());
@@ -30,7 +30,7 @@ pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Benchmark
         );
     }
 
-    return Some(BenchmarkRun {
+    return Some(Cvc5BenchmarkRun {
         bench_id: benchmark.id,
         exit_code: output.status.code().unwrap_or(100000),
         time_ms: duration

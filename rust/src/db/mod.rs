@@ -1,7 +1,7 @@
 mod init;
 use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::GcovRes;
-use crate::types::{Benchmark, BenchmarkRun, Status};
+use crate::types::{Benchmark, Cvc5BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
 
 use log::info;
@@ -224,7 +224,7 @@ impl DbWriter {
         Ok(())
     }
 
-    pub fn add_cvc5_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
+    pub fn add_cvc5_run_result(&mut self, run_result: Cvc5BenchmarkRun) -> ResultT<()> {
         let mut stmt_insert_cvc5result = self
             .conn
             .prepare_cached(

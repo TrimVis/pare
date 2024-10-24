@@ -3,7 +3,7 @@ mod gcov;
 mod worker;
 pub use gcov::GcovRes;
 
-use crate::types::{Benchmark, BenchmarkRun};
+use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
 
 use std::collections::HashSet;
@@ -17,8 +17,7 @@ enum RunnerQueueMessage {
 
 enum ProcessingQueueMessage {
     Start(Benchmark),
-    Cvc5Res(Benchmark, BenchmarkRun),
-    GcovRes(Benchmark, GcovRes),
+    Result(Benchmark, Cvc5BenchmarkRun, Option<GcovRes>),
     Stop,
 }
 
@@ -92,7 +91,10 @@ impl Runner {
 
     // Due to circular dependency between workers, use this with care, it will crash
     pub fn stop(&mut self) {
-        self.runner_queue.send(RunnerQueueMessage::Stop).unwrap();
+        // FIXME: This is a hack
+        for _ in &self.runner_workers {
+            self.runner_queue.send(RunnerQueueMessage::Stop).unwrap();
+        }
         self.processing_queue
             .send(ProcessingQueueMessage::Stop)
             .unwrap();
