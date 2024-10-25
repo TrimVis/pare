@@ -7,7 +7,7 @@ use crate::{ResultT, ARGS};
 use itertools::Itertools;
 use log::info;
 use rusqlite::{params, Connection, OpenFlags};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -180,8 +180,6 @@ const INSERT_BATCH_SIZE: usize = 400;
 
 pub struct DbWriter {
     conn: Connection,
-
-    gcov_benchs_added: HashSet<u64>,
 }
 
 impl DbWriter {
@@ -207,10 +205,7 @@ impl DbWriter {
             init::populate_status(conn.transaction()?).expect("Issue during status population");
         }
 
-        Ok(DbWriter {
-            conn,
-            gcov_benchs_added: HashSet::new(),
-        })
+        Ok(DbWriter { conn })
     }
 
     pub fn write_to_disk(&self) -> ResultT<()> {
@@ -259,21 +254,15 @@ impl DbWriter {
         Ok(())
     }
 
-    pub fn add_gcov_measurement(&mut self, bench_id: u64, run_result: GcovRes) -> ResultT<()> {
-        assert!(
-            !self.gcov_benchs_added.contains(&bench_id),
-            "Multiple measurements for the same benchmark!"
-        );
-        self.gcov_benchs_added.insert(bench_id);
-
+    pub fn add_gcov_measurement(&mut self, run_result: GcovRes) -> ResultT<()> {
         let tx = self.conn.transaction()?;
         // 1. Ensure all sources exist in DB & retrieve their ids
         {
-            let mut batch_query = String::new();
             for chunk in &run_result.iter().chunks(INSERT_BATCH_SIZE) {
+                let mut batch_query = String::new();
                 for (file, _) in chunk {
                     batch_query.push_str(&format!(
-                        "INSERT INTO \"sources\" ( path ) VALUES ( '{}' )",
+                        "INSERT INTO \"sources\" ( path ) VALUES ( '{}' ) ON CONFLICT DO NOTHING;",
                         file
                     ));
                 }
@@ -298,14 +287,14 @@ impl DbWriter {
 
         // 2. Track usage data of all (used) functions
         if TRACK_FUNCS.clone() {
-            let mut batch_query = String::new();
             for (file, (funcs, _, _)) in &run_result {
                 let sid = srcid_file_map.get(file).unwrap();
                 for chunk in &funcs
-                    .iter()
+                    .values()
                     .filter(|f| f.usage.load(Ordering::SeqCst) > 0)
                     .chunks(INSERT_BATCH_SIZE)
                 {
+                    let mut batch_query = String::new();
                     for func in chunk {
                         // TODO: Investigate why functions are replicated across sources
                         batch_query.push_str(&format!(
@@ -317,7 +306,9 @@ impl DbWriter {
                             end_line,
                             end_col,
                             benchmark_usage_count
-                        ) VALUES ('{}', '{}', {}, {}, {}, {}, {})",
+                        ) VALUES ('{}', '{}', {}, {}, {}, {}, {}) 
+                        ON CONFLICT (source_id, name) DO UPDATE 
+                        SET benchmark_usage_count = benchmark_usage_count + excluded.benchmark_usage_count;",
                             sid.to_string(),
                             func.name.to_string(),
                             func.start.line.to_string(),
@@ -327,8 +318,8 @@ impl DbWriter {
                             func.usage.load(Ordering::SeqCst)
                         ));
                     }
+                    tx.execute_batch(&batch_query)?;
                 }
-                tx.execute_batch(&batch_query)?;
             }
         }
 
@@ -337,7 +328,7 @@ impl DbWriter {
             for (file, (_, lines, _)) in &run_result {
                 let sid = srcid_file_map.get(file).unwrap();
                 for chunk in &lines
-                    .iter()
+                    .values()
                     .filter(|l| l.usage.load(Ordering::SeqCst) > 0)
                     .chunks(INSERT_BATCH_SIZE)
                 {
@@ -348,7 +339,9 @@ impl DbWriter {
                             source_id,
                             line_no,
                             benchmark_usage_count
-                        ) VALUES ({}, {}, {});",
+                        ) VALUES ({}, {}, {})
+                        ON CONFLICT (source_id, line_no) DO UPDATE 
+                        SET benchmark_usage_count = benchmark_usage_count + excluded.benchmark_usage_count;",
                             *sid,
                             line.line_no,
                             line.usage.load(Ordering::SeqCst)

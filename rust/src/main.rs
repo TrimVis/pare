@@ -81,6 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         runner.enqueue(b);
     }
 
+    info!("Updating count");
     let mut done_count = db.waiting_count()?;
     let loop_start = Instant::now();
     while done_count < total_count {
@@ -104,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // High timeout to not introduce unnecessary overhead
-        thread::sleep(Duration::from_secs(60));
+        thread::sleep(Duration::from_secs(1));
     }
 
     done_pb.finish_with_message("Processed all files");

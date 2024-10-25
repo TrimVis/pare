@@ -3,6 +3,8 @@ use super::gcov;
 use super::ProcessingQueueMessage;
 use super::RunnerQueueMessage;
 use crate::db::DbWriter;
+use crate::runner::gcov::merge_gcov;
+use crate::runner::GcovRes;
 use crate::types::Status;
 use crate::ARGS;
 
@@ -148,7 +150,8 @@ impl Worker {
             // which obviously doesn't scale well
 
             // Batch process 100 results at once to decrease load on DB
-            // let mut result_buf = Vec::with_capacity(100);
+            const RESULT_BUF_CAPACITY: usize = 100;
+            let mut result_buf: Vec<GcovRes> = Vec::with_capacity(RESULT_BUF_CAPACITY);
 
             loop {
                 let job = receiver.recv();
@@ -161,43 +164,24 @@ impl Worker {
                         info!("[DB Writer] Received a result (bench_id: {})", benchmark.id);
                         let start = Instant::now();
                         debug!(
-                            "[DB Writer] Received cvc5 result (bench_id: {})",
+                            "[DB Writer] Writing cvc5 result to DB (bench_id: {})",
                             benchmark.id
                         );
-                        let res_exit = cvc5_result.exit_code;
                         db.add_cvc5_run_result(cvc5_result).unwrap();
-                        db.update_benchmark_status(
-                            benchmark.id,
-                            if res_exit == 0 {
-                                Status::Processing
-                            } else {
-                                Status::Done
-                            },
-                        )
-                        .unwrap();
+                        if let Some(gcov_result) = gcov_result {
+                            debug!(
+                            "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",
+                            benchmark.id
+                        );
+                            result_buf.push(gcov_result);
+                        }
+                        db.update_benchmark_status(benchmark.id, Status::Done)
+                            .expect("Could not update bench status");
                         debug!(
-                            "[DB Writer] Processed cvc5 result in {}ms (bench_id: {})",
+                            "[DB Writer] Processed result in {}ms (bench_id: {})",
                             start.elapsed().as_millis(),
                             benchmark.id
                         );
-                        if let Some(gcov_result) = gcov_result {
-                            let start = Instant::now();
-                            debug!(
-                                "[DB Writer] Received GCOV result (bench_id: {})",
-                                benchmark.id
-                            );
-                            db.add_gcov_measurement(benchmark.id, gcov_result)
-                                .expect("Could not add gcov measurement");
-                            db.update_benchmark_status(benchmark.id, Status::Done)
-                                .expect("Could not update bench status");
-                            debug!(
-                                "[DB Writer] Processed GCOV result in {}ms (bench_id: {})",
-                                start.elapsed().as_millis(),
-                                benchmark.id
-                            );
-                        } else {
-                            debug!("[DB Writer] No GCOV result (bench_id: {})", benchmark.id);
-                        }
                     }
                     Ok(ProcessingQueueMessage::Stop) => {
                         warn!("[DB Writer] received stop signal; shutting down.");
@@ -207,6 +191,27 @@ impl Worker {
                         warn!("[DB Writer] Disconnected; shutting down.");
                         break;
                     }
+                }
+
+                if result_buf.len() == RESULT_BUF_CAPACITY {
+                    info!(
+                        "[DB Writer] Merging buffered gcov results & writing to DB. (buf_size: {})",
+                        RESULT_BUF_CAPACITY
+                    );
+                    let start = Instant::now();
+                    let result = merge_gcov(result_buf);
+                    debug!(
+                        "[DB Writer] Merged GCOV results in {}ms",
+                        start.elapsed().as_millis()
+                    );
+                    let start = Instant::now();
+                    db.add_gcov_measurement(result)
+                        .expect("Could not add gcov measurement");
+                    result_buf = Vec::with_capacity(RESULT_BUF_CAPACITY);
+                    debug!(
+                        "[DB Writer] Inserted merged GCOV result in {}ms",
+                        start.elapsed().as_millis()
+                    );
                 }
             }
 

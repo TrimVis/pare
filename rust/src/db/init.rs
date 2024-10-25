@@ -53,7 +53,7 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
     // Store information about source files
     let source_table = "CREATE TABLE IF NOT EXISTS \"sources\" (
                 id INTEGER PRIMARY KEY,
-                path INTEGER NOT NULL
+                path INTEGER NOT NULL UNIQUE
             )";
     conn.execute(&source_table, [])
         .expect("Issue during sources table creation");

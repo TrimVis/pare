@@ -1,4 +1,4 @@
-use crate::args::{CoverageMode, ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::types::{
     Benchmark, FilePosition, GcovBranchResult, GcovFuncResult, GcovLineResult, ResultT,
 };
@@ -15,21 +15,13 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-pub type GcovIRes = HashMap<
+// Maps from SrcFileName -> Line/Function/Branch Identifier -> Result
+pub type GcovRes = HashMap<
     Arc<String>,
     (
         HashMap<Arc<String>, Arc<GcovFuncResult>>,
         HashMap<u32, Arc<GcovLineResult>>,
         HashMap<u32, Arc<GcovBranchResult>>,
-    ),
->;
-
-pub type GcovRes = HashMap<
-    Arc<String>,
-    (
-        Vec<Arc<GcovFuncResult>>,
-        Vec<Arc<GcovLineResult>>,
-        Vec<Arc<GcovBranchResult>>,
     ),
 >;
 
@@ -51,7 +43,7 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
     }
 
-    let mut ires: GcovIRes = HashMap::new();
+    let mut ires = vec![];
     for gcda_chunk in files.chunks(CHUNK_SIZE) {
         let mut gcno_symlinks = vec![];
         for gcda_file in gcda_chunk {
@@ -89,53 +81,9 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                     let gcov_json: GcovJson =
                         serde_json::from_str(&line).expect("Error parsing gcov json output");
 
-                    for (key, value) in interpret_gcov(&gcov_json)
-                        .expect("Could not interpret gcov output properly")
-                    {
-                        ires.entry(key)
-                            .and_modify(|pvalue| {
-                                if TRACK_FUNCS.clone() {
-                                    for (k, v) in &value.0 {
-                                        pvalue
-                                            .0
-                                            .entry(Arc::clone(k))
-                                            .and_modify(|e| {
-                                                let v_usage = v.usage.load(Ordering::SeqCst);
-                                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
-                                            })
-                                            .or_insert(Arc::clone(v));
-                                    }
-                                }
-
-                                if TRACK_LINES.clone() {
-                                    for (k, v) in &value.1 {
-                                        pvalue
-                                            .1
-                                            .entry(*k)
-                                            .and_modify(|e| {
-                                                let v_usage = v.usage.load(Ordering::SeqCst);
-                                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
-                                            })
-                                            .or_insert(Arc::clone(v));
-                                    }
-                                }
-
-                                if TRACK_BRANCHES.clone() {
-                                    unreachable!();
-                                    // for (k, v) in value.2 {
-                                    //     pvalue
-                                    //         .2
-                                    //         .entry(k)
-                                    //         .and_modify(|_e| {
-                                    //             if ARGS.mode == CoverageMode::Full {
-                                    //             }
-                                    //         })
-                                    //         .or_insert(v);
-                                    // }
-                                }
-                            })
-                            .or_insert(value);
-                    }
+                    ires.push(
+                        interpret_gcov(&gcov_json).expect("Error while interpreting gcov output"),
+                    );
                 }
                 Err(_) => error!("An error occurred while reading the output lines of gcov"),
             }
@@ -150,44 +98,79 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
     }
 
-    // let result: GcovRes = HashMap::new();
-    // for (key, value) in ires {
-    //     let funcs = value.0.into_values();
-    //     result.insert(key, (funcs, ))
-    // }
-    //
-    let result: GcovRes = ires
-        .iter()
-        .map(|(key, value)| {
-            (
-                Arc::clone(key),
-                (
-                    value.0.values().cloned().collect(),
-                    value.1.values().cloned().collect(),
-                    value.2.values().cloned().collect(),
-                ),
-            )
-        })
-        .collect();
+    return merge_gcov(ires);
+
     // let result: GcovRes = ires
     //     .iter()
     //     .map(|(key, value)| {
     //         (
-    //             key.clone(),
+    //             Arc::clone(key),
     //             (
-    //                 value.0.into_values().collect(),
-    //                 value.1.into_values().collect(),
-    //                 value.2.into_values().collect(),
+    //                 value.0.values().cloned().collect(),
+    //                 value.1.values().cloned().collect(),
+    //                 value.2.values().cloned().collect(),
     //             ),
     //         )
     //     })
     //     .collect();
 
-    return result;
+    // return result;
 }
 
-fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
-    let mut result: GcovIRes = HashMap::new();
+pub fn merge_gcov(ires: Vec<GcovRes>) -> GcovRes {
+    let mut res: GcovRes = HashMap::new();
+    for iires in ires {
+        for (key, value) in iires {
+            res.entry(key)
+                .and_modify(|pvalue| {
+                    if TRACK_FUNCS.clone() {
+                        for (k, v) in &value.0 {
+                            pvalue
+                                .0
+                                .entry(Arc::clone(k))
+                                .and_modify(|e| {
+                                    let v_usage = v.usage.load(Ordering::SeqCst);
+                                    e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                                })
+                                .or_insert(Arc::clone(v));
+                        }
+                    }
+
+                    if TRACK_LINES.clone() {
+                        for (k, v) in &value.1 {
+                            pvalue
+                                .1
+                                .entry(*k)
+                                .and_modify(|e| {
+                                    let v_usage = v.usage.load(Ordering::SeqCst);
+                                    e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                                })
+                                .or_insert(Arc::clone(v));
+                        }
+                    }
+
+                    if TRACK_BRANCHES.clone() {
+                        unreachable!();
+                        // for (k, v) in value.2 {
+                        //     pvalue
+                        //         .2
+                        //         .entry(k)
+                        //         .and_modify(|_e| {
+                        //             if ARGS.mode == CoverageMode::Full {
+                        //             }
+                        //         })
+                        //         .or_insert(v);
+                        // }
+                    }
+                })
+                .or_insert(value);
+        }
+    }
+    return res;
+}
+
+fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
+    let mut result: GcovRes = HashMap::new();
 
     for file in &json.files {
         // Filter out libraries unless specified otherwise
