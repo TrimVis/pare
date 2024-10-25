@@ -60,7 +60,7 @@ impl Worker {
                                 benchmark.id
                             );
                             match processing_queue.send(ProcessingQueueMessage::Result(
-                                benchmark,
+                                benchmark.id,
                                 cvc5_result,
                                 Some(gcov_result),
                             )) {
@@ -77,7 +77,7 @@ impl Worker {
                             }
                         } else {
                             match processing_queue.send(ProcessingQueueMessage::Result(
-                                benchmark,
+                                benchmark.id,
                                 cvc5_result,
                                 None,
                             )) {
@@ -156,9 +156,6 @@ impl Worker {
                 ))
                 .unwrap();
 
-            // FIXME: The DB is the current bottlenck, with each full insert taking around 20s,
-            // which obviously doesn't scale well
-
             // Batch process 100 results at once to decrease load on DB
             const RESULT_BUF_CAPACITY: usize = 100;
             let mut result_buf: Vec<GcovRes> = Vec::with_capacity(RESULT_BUF_CAPACITY);
@@ -166,10 +163,9 @@ impl Worker {
             loop {
                 let job = receiver.recv();
                 match job {
-                    Ok(ProcessingQueueMessage::Result(benchmark, cvc5_result, gcov_result)) => {
-                        let bench_id = benchmark.id;
+                    Ok(ProcessingQueueMessage::Result(bench_id, cvc5_result, gcov_result)) => {
                         let start = Instant::now();
-                        info!("[DB Writer] Received a result (bench_id: {})", benchmark.id);
+                        info!("[DB Writer] Received a result (bench_id: {})", bench_id);
                         debug!(
                             "[DB Writer] Writing cvc5 result to DB (bench_id: {})",
                             bench_id
@@ -183,7 +179,7 @@ impl Worker {
                             result_buf.push(gcov_result);
                         }
                         status_sender
-                            .send(ProcessingStatusMessage::BenchDone(benchmark))
+                            .send(ProcessingStatusMessage::BenchDone(bench_id))
                             .expect("Could not update bench status");
                         debug!(
                             "[DB Writer] Processed result in {}ms (bench_id: {})",

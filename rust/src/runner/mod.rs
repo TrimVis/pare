@@ -17,14 +17,14 @@ enum RunnerQueueMessage {
 }
 
 enum ProcessingQueueMessage {
-    Result(Benchmark, Cvc5BenchmarkRun, Option<GcovRes>),
+    Result(u64, Cvc5BenchmarkRun, Option<GcovRes>),
     Stop,
 }
 
 enum ProcessingStatusMessage {
     DbInitSuccess,
     DbInitError,
-    BenchDone(Benchmark),
+    BenchDone(u64),
     Benchmarks(Vec<Benchmark>),
 }
 
@@ -94,7 +94,7 @@ impl Runner {
         }
     }
 
-    pub fn wait_for_next_bench_done(&mut self) -> Benchmark {
+    pub fn wait_for_next_bench_done(&mut self) -> u64 {
         match self.processing_status_queue.recv().unwrap() {
             ProcessingStatusMessage::BenchDone(res) => res,
             _ => unreachable!("This message was not expected!"),

@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-const MEMORY_CONN_URI: &str = "file::memory:?cache=shared";
+const MEMORY_CONN_URI: &str = ":memory:";
 const INSERT_BATCH_SIZE: usize = 400;
 
 pub struct DbWriter {
@@ -141,7 +141,6 @@ impl DbWriter {
                 {
                     let mut batch_query = String::new();
                     for func in chunk {
-                        // TODO: Investigate why functions are replicated across sources
                         batch_query.push_str(&format!(
                             "INSERT INTO \"functions\" (
                             source_id,
