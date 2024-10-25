@@ -34,14 +34,6 @@ pub static TRACK_LINES: Lazy<bool> =
 pub static TRACK_BRANCHES: Lazy<bool> =
     Lazy::new(|| ARGS.coverage_kinds.contains(&CoverageKind::Branches));
 
-pub static DB_USAGE_NAME: Lazy<String> = Lazy::new(|| {
-    if ARGS.mode == CoverageMode::Full {
-        "execution_count".to_string()
-    } else {
-        "benchmark_count".to_string()
-    }
-});
-
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
 pub enum CoverageMode {
     Aggregated,
@@ -94,10 +86,6 @@ pub struct CliArgs {
     /// Arguments for cvc5
     #[arg(short = 'a', long, default_value = "--tlimit 2000")]
     pub cvc5_args: String,
-
-    /// Coverage Mode, determines how much data is stored into the DB
-    #[arg(short = 'm', long, default_value_t = CoverageMode::Aggregated)]
-    pub mode: CoverageMode,
 
     /// Kinds of code elements for which usage data will be collected
     #[arg(

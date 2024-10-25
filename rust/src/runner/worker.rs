@@ -144,6 +144,12 @@ impl Worker {
             };
             let mut db = db.unwrap();
 
+            // FIXME: The DB is the current bottlenck, with each full insert taking around 20s,
+            // which obviously doesn't scale well
+
+            // Batch process 100 results at once to decrease load on DB
+            // let mut result_buf = Vec::with_capacity(100);
+
             loop {
                 let job = receiver.recv();
                 match job {

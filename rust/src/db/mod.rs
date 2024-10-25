@@ -1,12 +1,13 @@
 mod init;
-use crate::args::{CoverageMode, DB_USAGE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::GcovRes;
 use crate::types::{Benchmark, Cvc5BenchmarkRun, Status};
 use crate::{ResultT, ARGS};
 
+use itertools::Itertools;
 use log::info;
 use rusqlite::{params, Connection, OpenFlags};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -175,8 +176,12 @@ impl DbReader {
     }
 }
 
+const INSERT_BATCH_SIZE: usize = 400;
+
 pub struct DbWriter {
     conn: Connection,
+
+    gcov_benchs_added: HashSet<u64>,
 }
 
 impl DbWriter {
@@ -202,7 +207,10 @@ impl DbWriter {
             init::populate_status(conn.transaction()?).expect("Issue during status population");
         }
 
-        Ok(DbWriter { conn })
+        Ok(DbWriter {
+            conn,
+            gcov_benchs_added: HashSet::new(),
+        })
     }
 
     pub fn write_to_disk(&self) -> ResultT<()> {
@@ -252,24 +260,30 @@ impl DbWriter {
     }
 
     pub fn add_gcov_measurement(&mut self, bench_id: u64, run_result: GcovRes) -> ResultT<()> {
+        assert!(
+            !self.gcov_benchs_added.contains(&bench_id),
+            "Multiple measurements for the same benchmark!"
+        );
+        self.gcov_benchs_added.insert(bench_id);
+
+        let tx = self.conn.transaction()?;
         // 1. Ensure all sources exist in DB & retrieve their ids
         {
-            let src_tx = self.conn.transaction()?;
-            {
-                let mut src_stmt =
-                    src_tx.prepare_cached("INSERT INTO \"sources\" ( path ) VALUES ( ?1 )")?;
-                for (file, _) in &run_result {
-                    src_stmt.execute(params![file])?;
+            let mut batch_query = String::new();
+            for chunk in &run_result.iter().chunks(INSERT_BATCH_SIZE) {
+                for (file, _) in chunk {
+                    batch_query.push_str(&format!(
+                        "INSERT INTO \"sources\" ( path ) VALUES ( '{}' )",
+                        file
+                    ));
                 }
+                tx.execute_batch(&batch_query)?;
             }
-            src_tx.commit()?;
         }
 
         let mut srcid_file_map: HashMap<Arc<String>, u64>;
         {
-            let mut stmt = self
-                .conn
-                .prepare_cached("SELECT id, path FROM \"sources\"")?;
+            let mut stmt = tx.prepare_cached("SELECT id, path FROM \"sources\"")?;
             let rows = stmt.query_map(params![], |row| {
                 let id: u64 = row.get(0)?;
                 let file: String = row.get(1)?;
@@ -282,183 +296,66 @@ impl DbWriter {
             }
         }
 
-        // 2. Ensure all (used) functions exist in DB & retrieve their ids
+        // 2. Track usage data of all (used) functions
         if TRACK_FUNCS.clone() {
-            {
-                let func_tx = self.conn.transaction()?;
+            let mut batch_query = String::new();
+            for (file, (funcs, _, _)) in &run_result {
+                let sid = srcid_file_map.get(file).unwrap();
+                for chunk in &funcs
+                    .iter()
+                    .filter(|f| f.usage.load(Ordering::SeqCst) > 0)
+                    .chunks(INSERT_BATCH_SIZE)
                 {
-                    let mut func_stmt = func_tx.prepare_cached(
-                        "INSERT INTO \"functions\" (
+                    for func in chunk {
+                        // TODO: Investigate why functions are replicated across sources
+                        batch_query.push_str(&format!(
+                            "INSERT INTO \"functions\" (
                             source_id,
                             name,
                             start_line,
                             start_col,
                             end_line,
-                            end_col
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    )?;
-                    for (file, (funcs, _, _)) in &run_result {
-                        let sid = srcid_file_map.get(file).unwrap();
-                        for func in funcs {
-                            if func.usage.load(Ordering::SeqCst) == 0 {
-                                continue;
-                            }
-                            func_stmt.execute(params![
-                                sid.to_string(),
-                                func.name.to_string(),
-                                func.start.line.to_string(),
-                                func.start.col.to_string(),
-                                func.end.line.to_string(),
-                                func.end.col.to_string(),
-                            ])?;
-                        }
+                            end_col,
+                            benchmark_usage_count
+                        ) VALUES ('{}', '{}', {}, {}, {}, {}, {})",
+                            sid.to_string(),
+                            func.name.to_string(),
+                            func.start.line.to_string(),
+                            func.start.col.to_string(),
+                            func.end.line.to_string(),
+                            func.end.col.to_string(),
+                            func.usage.load(Ordering::SeqCst)
+                        ));
                     }
                 }
-                func_tx.commit()?;
-            }
-
-            let mut id_fname_map: HashMap<(u64, String), u64>;
-            {
-                let mut stmt = self
-                    .conn
-                    .prepare_cached("SELECT id, source_id, name FROM \"functions\"")?;
-                let rows = stmt.query_map(params![], |row| {
-                    let id: u64 = row.get(0)?;
-                    let source_id: u64 = row.get(1)?;
-                    let name: String = row.get(2)?;
-                    Ok(((source_id, name), id))
-                })?;
-                id_fname_map = HashMap::with_capacity(rows.size_hint().0);
-                for row in rows {
-                    let (key, value) = row?;
-                    id_fname_map.insert(key, value);
-                }
-            }
-
-            // 3. Insert all function usage data into the DB
-            {
-                let funcusage_tx = self.conn.transaction()?;
-                {
-                    let funcusage_query = if ARGS.mode == CoverageMode::Full {
-                        format!(
-                            "INSERT INTO \"usage_functions\" (
-                                bench_id,
-                                func_id,
-                                {0}
-                            ) VALUES (?1, ?2, ?3)",
-                            DB_USAGE_NAME.clone()
-                        )
-                    } else {
-                        format!(
-                            "INSERT INTO \"usage_functions\" (
-                                func_id,
-                                {0}
-                            ) VALUES (?2, ?3)",
-                            DB_USAGE_NAME.clone()
-                        )
-                    };
-                    let mut funcusage_stmt = funcusage_tx.prepare_cached(&funcusage_query)?;
-                    for (file, (funcs, _, _)) in &run_result {
-                        let sid = srcid_file_map.get(file).unwrap();
-                        for func in funcs {
-                            if func.usage.load(Ordering::SeqCst) == 0 {
-                                continue;
-                            }
-                            let funcid = id_fname_map.get(&(*sid, func.name.to_string())).unwrap();
-
-                            funcusage_stmt.execute(params![
-                                bench_id,
-                                *funcid,
-                                func.usage.load(Ordering::SeqCst)
-                            ])?;
-                        }
-                    }
-                }
-
-                funcusage_tx.commit()?;
+                tx.execute_batch(&batch_query)?;
             }
         }
 
-        // 4. Ensure all lines exist in DB & retrieve their ids
+        // 2. Track usage data of all (used) lines
         if TRACK_LINES.clone() {
-            {
-                let line_tx = self.conn.transaction()?;
+            for (file, (_, lines, _)) in &run_result {
+                let sid = srcid_file_map.get(file).unwrap();
+                for chunk in &lines
+                    .iter()
+                    .filter(|l| l.usage.load(Ordering::SeqCst) > 0)
+                    .chunks(INSERT_BATCH_SIZE)
                 {
-                    let mut line_stmt = line_tx.prepare_cached(
-                        "INSERT INTO \"lines\" (
+                    let mut batch_query = String::new();
+                    for line in chunk {
+                        batch_query.push_str(&format!(
+                            "INSERT INTO \"lines\" (
                             source_id,
-                            line_no
-                        ) VALUES (?1, ?2)",
-                    )?;
-                    for (file, (_, lines, _)) in &run_result {
-                        let sid = srcid_file_map.get(file).unwrap();
-                        for line in lines {
-                            if line.usage.load(Ordering::SeqCst) == 0 {
-                                continue;
-                            }
-                            line_stmt.execute(params![*sid, line.line_no])?;
-                        }
+                            line_no,
+                            benchmark_usage_count
+                        ) VALUES ({}, {}, {});",
+                            *sid,
+                            line.line_no,
+                            line.usage.load(Ordering::SeqCst)
+                        ));
                     }
+                    tx.execute_batch(&batch_query)?;
                 }
-                line_tx.commit()?;
-            }
-
-            let mut id_line_map: HashMap<(u64, u64), u64>;
-            {
-                let mut stmt = self
-                    .conn
-                    .prepare_cached("SELECT id, source_id, line_no FROM \"lines\"")?;
-                let rows = stmt.query_map(params![], |row| {
-                    let id: u64 = row.get(0)?;
-                    let source_id: u64 = row.get(1)?;
-                    let line_no: u64 = row.get(2)?;
-                    Ok(((source_id, line_no), id))
-                })?;
-                id_line_map = HashMap::with_capacity(rows.size_hint().0);
-                for row in rows {
-                    let (key, value) = row?;
-                    id_line_map.insert(key, value);
-                }
-            }
-            // 5. Insert all line usage data into the DB
-            {
-                let lineusage_tx = self.conn.transaction()?;
-                {
-                    let lineusage_query = if ARGS.mode == CoverageMode::Full {
-                        format!(
-                            "INSERT INTO \"usage_lines\" (
-                            bench_id,
-                            line_id,
-                            {0}
-                        ) VALUES (?1, ?2, ?3)",
-                            DB_USAGE_NAME.clone()
-                        )
-                    } else {
-                        format!(
-                            "INSERT INTO \"usage_lines\" (
-                            line_id,
-                            {0}
-                        ) VALUES (?2, ?3)",
-                            DB_USAGE_NAME.clone()
-                        )
-                    };
-                    let mut lineusage_stmt = lineusage_tx.prepare_cached(&lineusage_query)?;
-                    for (file, (_, lines, _)) in &run_result {
-                        let sid = srcid_file_map.get(file).unwrap();
-                        for line in lines {
-                            if line.usage.load(Ordering::SeqCst) == 0 {
-                                continue;
-                            }
-                            let lineid = id_line_map.get(&(*sid, line.line_no.into())).unwrap();
-                            lineusage_stmt.execute(params![
-                                bench_id,
-                                *lineid,
-                                line.usage.load(Ordering::SeqCst)
-                            ])?;
-                        }
-                    }
-                }
-                lineusage_tx.commit()?;
             }
         }
 
@@ -466,6 +363,7 @@ impl DbWriter {
             // TODO: Add support for branch tracking
             unimplemented!("Branch tracking not yet supported")
         }
+        tx.commit()?;
 
         Ok(())
     }

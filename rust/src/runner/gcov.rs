@@ -100,11 +100,8 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                                             .0
                                             .entry(Arc::clone(k))
                                             .and_modify(|e| {
-                                                if ARGS.mode == CoverageMode::Full {
-                                                    // e.usage += v.usage;
-                                                    let v_usage = v.usage.load(Ordering::SeqCst);
-                                                    e.usage.fetch_add(v_usage, Ordering::SeqCst);
-                                                }
+                                                let v_usage = v.usage.load(Ordering::SeqCst);
+                                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
                                             })
                                             .or_insert(Arc::clone(v));
                                     }
@@ -116,10 +113,8 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                                             .1
                                             .entry(*k)
                                             .and_modify(|e| {
-                                                if ARGS.mode == CoverageMode::Full {
-                                                    let v_usage = v.usage.load(Ordering::SeqCst);
-                                                    e.usage.fetch_add(v_usage, Ordering::SeqCst);
-                                                }
+                                                let v_usage = v.usage.load(Ordering::SeqCst);
+                                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
                                             })
                                             .or_insert(Arc::clone(v));
                                     }
@@ -202,11 +197,7 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
         let mut funcs: HashMap<Arc<String>, Arc<GcovFuncResult>> = HashMap::new();
         if TRACK_FUNCS.clone() {
             for function in &file.functions {
-                let usage = if ARGS.mode == CoverageMode::Full {
-                    function.execution_count as u32
-                } else {
-                    (function.execution_count as u32 > 0) as u32
-                };
+                let usage = (function.execution_count as u32 > 0) as u32;
                 let name = function.demangled_name.clone();
                 funcs.insert(
                     Arc::from(name.clone()),
@@ -229,11 +220,7 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovIRes> {
         let mut lines: HashMap<u32, Arc<GcovLineResult>> = HashMap::new();
         if TRACK_LINES.clone() {
             for line in &file.lines {
-                let usage = if ARGS.mode == CoverageMode::Full {
-                    line.count as u32
-                } else {
-                    (line.count as u32 > 0) as u32
-                };
+                let usage = (line.count as u32 > 0) as u32;
                 lines.insert(
                     line.line_number,
                     Arc::from(GcovLineResult {

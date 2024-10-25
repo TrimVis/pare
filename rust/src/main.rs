@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(log_target))
-        .filter(None, LevelFilter::Info) // Set default log level to Info
+        .filter(None, LevelFilter::Debug) // Set default log level to Info
         .format_level(true)
         .format_timestamp_secs()
         .build();
@@ -56,9 +56,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log::set_max_level(level);
 
     // Runner Setup
+    info!("Creating runners and waiting on db to be initialized");
     let mut runner = runner::Runner::new();
     runner.wait_on_db_ready();
-    info!("Waiting on db to be initialized");
 
     let mut db = db::DbReader::new()?;
 
