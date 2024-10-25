@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(log_target))
-        .filter(None, LevelFilter::Debug) // Set default log level to Info
+        .filter(None, LevelFilter::Info) // Set default log level to Info
         .format_level(true)
         .format_timestamp_secs()
         .build();
@@ -77,7 +77,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         runner.enqueue(b);
     }
 
-    info!("Updating count");
     let mut done_count = 0;
     done_pb.reset_elapsed();
     let loop_start = Instant::now();
@@ -91,8 +90,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         done_pb.set_message(eta_msg.clone());
         done_pb.set_position(done_count as u64);
-        info!(" PROCESSED {}/{} BENCHMARK FILES", done_count, total_count);
-        info!(" {}", eta_msg);
+        if done_count % 100 == 0 {
+            info!(" Processed {}/{} Benchmark Files", done_count, total_count);
+            info!(" {}", eta_msg);
+        }
 
         runner.wait_for_next_bench_done();
         done_count += 1;
