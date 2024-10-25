@@ -16,9 +16,8 @@ use std::fs::{remove_dir_all, File};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 use std::time::Instant;
+use types::Benchmark;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting benchmark suite");
@@ -59,12 +58,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating runners and waiting on db to be initialized");
     let mut runner = runner::Runner::new();
     runner.wait_on_db_ready();
-
-    let mut db = db::DbReader::new()?;
+    let benchmarks: Vec<Benchmark> = runner.wait_for_all_benchmarks();
 
     // Fancy overall progress bar
-    let total_count = db.total_count()?;
-    let done_pb = multi.add(ProgressBar::new(total_count));
+    let total_count = benchmarks.len();
+    let done_pb = multi.add(ProgressBar::new(total_count as u64));
     done_pb.set_style(
         ProgressStyle::default_bar()
             .template(
@@ -75,18 +73,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     info!("Enqueuing all benchmarks");
-    // FIXME: This approach causes Ctrl+C to not work
-    // Ensure that there are always enough benchmarks enqueue
-    for b in db.retrieve_benchmarks_waiting(None)? {
+    for b in benchmarks {
         runner.enqueue(b);
     }
 
     info!("Updating count");
-    let mut done_count = db.waiting_count()?;
+    let mut done_count = 0;
+    done_pb.reset_elapsed();
     let loop_start = Instant::now();
     while done_count < total_count {
-        // Everything below this is only for a nice progress bar and to know when to return
-        done_count = db.done_count()?;
         let eta_msg = if done_count > 0 {
             let avg_entry_dur = loop_start.elapsed() / done_count.try_into().unwrap();
             let eta = avg_entry_dur * total_count.try_into().unwrap();
@@ -95,17 +90,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "ETA: ?".to_string()
         };
         done_pb.set_message(eta_msg.clone());
-        done_pb.set_position(done_count);
+        done_pb.set_position(done_count as u64);
         info!(" PROCESSED {}/{} BENCHMARK FILES", done_count, total_count);
         info!(" {}", eta_msg);
 
+        runner.wait_for_next_bench_done();
+        done_count += 1;
         // Early return in case of Ctrl+C or in case we already completed all tasks
         if !running.load(Ordering::SeqCst) || done_count == total_count {
             break;
         }
-
-        // High timeout to not introduce unnecessary overhead
-        thread::sleep(Duration::from_secs(1));
     }
 
     done_pb.finish_with_message("Processed all files");

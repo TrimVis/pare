@@ -2,6 +2,7 @@ mod cvc5;
 mod gcov;
 mod worker;
 pub use gcov::GcovRes;
+use log::warn;
 
 use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
@@ -16,16 +17,22 @@ enum RunnerQueueMessage {
 }
 
 enum ProcessingQueueMessage {
-    Start(Benchmark),
     Result(Benchmark, Cvc5BenchmarkRun, Option<GcovRes>),
     Stop,
+}
+
+enum ProcessingStatusMessage {
+    DbInitSuccess,
+    DbInitError,
+    BenchDone(Benchmark),
+    Benchmarks(Vec<Benchmark>),
 }
 
 pub struct Runner {
     runner_workers: Vec<worker::Worker>,
     runner_queue: channel::Sender<RunnerQueueMessage>,
 
-    processing_worker_ready_queue: channel::Receiver<Result<(), ()>>,
+    processing_status_queue: channel::Receiver<ProcessingStatusMessage>,
     processing_worker: worker::Worker,
     processing_queue: channel::Sender<ProcessingQueueMessage>,
 
@@ -38,11 +45,11 @@ impl Runner {
 
         assert!(no_workers > 0);
 
-        let (p_ready_send, p_ready_receiver) = channel::bounded(1);
+        let (p_status_send, p_status_receiver) = channel::unbounded();
         let (p_sender, p_receiver) = channel::bounded(10 * ARGS.job_size);
         let processing_queue = p_sender;
         let processing_worker =
-            worker::Worker::new_processing(p_ready_send.clone(), p_receiver.clone());
+            worker::Worker::new_processing(p_status_send.clone(), p_receiver.clone());
 
         let (r_sender, r_receiver) = channel::unbounded();
         let runner_receiver = r_receiver;
@@ -61,29 +68,43 @@ impl Runner {
             runner_workers,
             runner_queue,
 
-            processing_worker_ready_queue: p_ready_receiver,
             processing_worker,
             processing_queue,
+            processing_status_queue: p_status_receiver,
 
             enqueued: Box::from(HashSet::new()),
         }
     }
 
     pub fn wait_on_db_ready(&mut self) {
-        match self.processing_worker_ready_queue.recv() {
-            Ok(_) => {}
-            Err(_) => exit(1),
+        match self.processing_status_queue.recv().unwrap() {
+            ProcessingStatusMessage::DbInitSuccess => {}
+            ProcessingStatusMessage::DbInitError => {
+                warn!("Could not init DB in DB Writer. Exiting early...");
+                exit(1);
+            }
+            _ => unreachable!("This message was not expected!"),
+        }
+    }
+
+    pub fn wait_for_all_benchmarks(&mut self) -> Vec<Benchmark> {
+        match self.processing_status_queue.recv().unwrap() {
+            ProcessingStatusMessage::Benchmarks(res) => res,
+            _ => unreachable!("This message was not expected!"),
+        }
+    }
+
+    pub fn wait_for_next_bench_done(&mut self) -> Benchmark {
+        match self.processing_status_queue.recv().unwrap() {
+            ProcessingStatusMessage::BenchDone(res) => res,
+            _ => unreachable!("This message was not expected!"),
         }
     }
 
     pub fn enqueue(&mut self, benchmark: Benchmark) {
-        // Safety guard, if DB worker falls behind it happens that
-        // we try to enqueue entries multiple times
+        // Safety guard
         if !self.enqueued.contains(&benchmark.id) {
             self.enqueued.insert(benchmark.id);
-            self.processing_queue
-                .send(ProcessingQueueMessage::Start(benchmark.clone()))
-                .unwrap();
             self.runner_queue
                 .send(RunnerQueueMessage::Start(benchmark))
                 .unwrap();

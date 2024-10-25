@@ -27,3 +27,6 @@ serde_json = "1.0.128"
 sha2 = "0.10.8"
 
 
+[profile.release]
+codegen-units = 1
+lto = "fat"

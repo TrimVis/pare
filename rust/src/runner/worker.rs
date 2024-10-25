@@ -1,11 +1,11 @@
 use super::cvc5;
 use super::gcov;
 use super::ProcessingQueueMessage;
+use super::ProcessingStatusMessage;
 use super::RunnerQueueMessage;
 use crate::db::DbWriter;
 use crate::runner::gcov::merge_gcov;
 use crate::runner::GcovRes;
-use crate::types::Status;
 use crate::ARGS;
 
 use crossbeam::channel;
@@ -118,7 +118,7 @@ impl Worker {
     }
 
     pub(super) fn new_processing(
-        ready_sender: channel::Sender<Result<(), ()>>,
+        status_sender: channel::Sender<ProcessingStatusMessage>,
         receiver: channel::Receiver<ProcessingQueueMessage>,
     ) -> Worker {
         let thread = thread::spawn(move || {
@@ -137,14 +137,24 @@ impl Worker {
 
             let db = DbWriter::new(true);
             match db {
-                Ok(_) => ready_sender.send(Ok(())).unwrap(),
+                Ok(_) => status_sender
+                    .send(ProcessingStatusMessage::DbInitSuccess)
+                    .unwrap(),
                 Err(_) => {
-                    ready_sender.send(Err(())).unwrap();
+                    status_sender
+                        .send(ProcessingStatusMessage::DbInitError)
+                        .unwrap();
                     error!("Error during DB initialization... terminating DB writer early");
                     exit(1);
                 }
             };
             let mut db = db.unwrap();
+            status_sender
+                .send(ProcessingStatusMessage::Benchmarks(
+                    db.get_all_benchmarks()
+                        .expect("Could not retrieve benchmarks"),
+                ))
+                .unwrap();
 
             // FIXME: The DB is the current bottlenck, with each full insert taking around 20s,
             // which obviously doesn't scale well
@@ -156,31 +166,29 @@ impl Worker {
             loop {
                 let job = receiver.recv();
                 match job {
-                    Ok(ProcessingQueueMessage::Start(benchmark)) => {
-                        db.update_benchmark_status(benchmark.id, Status::Running)
-                            .expect("Could not update benchmark status");
-                    }
                     Ok(ProcessingQueueMessage::Result(benchmark, cvc5_result, gcov_result)) => {
-                        info!("[DB Writer] Received a result (bench_id: {})", benchmark.id);
+                        let bench_id = benchmark.id;
                         let start = Instant::now();
+                        info!("[DB Writer] Received a result (bench_id: {})", benchmark.id);
                         debug!(
                             "[DB Writer] Writing cvc5 result to DB (bench_id: {})",
-                            benchmark.id
+                            bench_id
                         );
                         db.add_cvc5_run_result(cvc5_result).unwrap();
                         if let Some(gcov_result) = gcov_result {
                             debug!(
                             "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",
-                            benchmark.id
+                            bench_id
                         );
                             result_buf.push(gcov_result);
                         }
-                        db.update_benchmark_status(benchmark.id, Status::Done)
+                        status_sender
+                            .send(ProcessingStatusMessage::BenchDone(benchmark))
                             .expect("Could not update bench status");
                         debug!(
                             "[DB Writer] Processed result in {}ms (bench_id: {})",
                             start.elapsed().as_millis(),
-                            benchmark.id
+                            bench_id
                         );
                     }
                     Ok(ProcessingQueueMessage::Stop) => {

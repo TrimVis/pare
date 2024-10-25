@@ -1,5 +1,4 @@
 use crate::args::{TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
-use crate::types::Status;
 use crate::{ResultT, ARGS};
 
 use glob::glob;
@@ -32,14 +31,6 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
             )";
     conn.execute(&config_table, [])
         .expect("Issue during config table creation");
-
-    // Stores the processing status for all benchmarks
-    let status_table = "CREATE TABLE IF NOT EXISTS \"status_benchmarks\" (
-                bench_id INTEGER NOT NULL PRIMARY KEY,
-                status TEXT
-            )";
-    conn.execute(&status_table, [])
-        .expect("Issue during benchmark status table creation");
 
     // Stores the benchmark metadata
     let benchmarks_table = "CREATE TABLE IF NOT EXISTS \"benchmarks\" (
@@ -179,28 +170,6 @@ pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
 
                 stmt.execute(params![dfile, prefix])?;
             }
-        }
-    }
-
-    tx.commit()?;
-
-    Ok(())
-}
-
-pub(super) fn populate_status(tx: Transaction) -> ResultT<()> {
-    // TODO: Readd sampling support
-    {
-        let mut select_stmt = tx.prepare("SELECT id FROM \"benchmarks\"")?;
-        let bench_rows = select_stmt.query_map([], |row| {
-            let id: u64 = row.get(0)?;
-            Ok(id)
-        })?;
-
-        let mut stmt =
-            tx.prepare("INSERT INTO \"status_benchmarks\" (bench_id, status) VALUES (?1, ?2)")?;
-        for row in bench_rows {
-            let bench_id = row.unwrap();
-            stmt.execute(params![bench_id, Status::Waiting as u64])?;
         }
     }
 

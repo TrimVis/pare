@@ -2,13 +2,6 @@ use std::path::PathBuf;
 
 pub type ResultT<T> = Result<T, Box<dyn std::error::Error>>;
 
-pub enum Status {
-    Waiting,
-    Running,
-    Processing,
-    Done,
-}
-
 #[derive(Debug, Clone)]
 pub struct FilePosition {
     pub line: u32,
