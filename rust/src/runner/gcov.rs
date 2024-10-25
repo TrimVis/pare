@@ -5,11 +5,13 @@ use crate::types::{
 
 use glob::glob;
 use log::error;
+use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use serde_json;
+use serde_json::de::Deserializer as JsonDeserializer;
 use std::collections::HashMap;
+use std::fmt;
 use std::fs::remove_file;
-use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -25,7 +27,7 @@ pub type GcovRes = HashMap<
     ),
 >;
 
-const CHUNK_SIZE: usize = 1;
+const CHUNK_SIZE: usize = 10;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = match benchmark.prefix.clone() {
@@ -72,28 +74,10 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
             continue;
         }
 
-        if CHUNK_SIZE == 1 {
-            let gcov_json: GcovJson = serde_json::from_slice(output.stdout.as_slice())
-                .expect("Error parsing gcov json output");
+        let mut deserializer = JsonDeserializer::from_slice(output.stdout.as_slice());
 
+        while let Ok(gcov_json) = GcovJson::deserialize(&mut deserializer) {
             ires.push(interpret_gcov(&gcov_json).expect("Error while interpreting gcov output"));
-        } else {
-            // Read lines from the stdout
-            let reader = BufReader::new(output.stdout.as_slice());
-            for line in reader.lines() {
-                match line {
-                    Ok(line) => {
-                        let gcov_json: GcovJson =
-                            serde_json::from_str(&line).expect("Error parsing gcov json output");
-
-                        ires.push(
-                            interpret_gcov(&gcov_json)
-                                .expect("Error while interpreting gcov output"),
-                        );
-                    }
-                    Err(_) => error!("An error occurred while reading the output lines of gcov"),
-                }
-            }
         }
 
         // Delete the gcda file gcno file if it was symlinked
@@ -106,22 +90,6 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     }
 
     return merge_gcov(ires);
-
-    // let result: GcovRes = ires
-    //     .iter()
-    //     .map(|(key, value)| {
-    //         (
-    //             Arc::clone(key),
-    //             (
-    //                 value.0.values().cloned().collect(),
-    //                 value.1.values().cloned().collect(),
-    //                 value.2.values().cloned().collect(),
-    //             ),
-    //         )
-    //     })
-    //     .collect();
-
-    // return result;
 }
 
 pub fn merge_gcov(ires: Vec<GcovRes>) -> GcovRes {
@@ -130,30 +98,26 @@ pub fn merge_gcov(ires: Vec<GcovRes>) -> GcovRes {
         for (key, value) in iires {
             res.entry(key)
                 .and_modify(|pvalue| {
-                    if TRACK_FUNCS.clone() {
-                        for (k, v) in &value.0 {
-                            pvalue
-                                .0
-                                .entry(Arc::clone(k))
-                                .and_modify(|e| {
-                                    let v_usage = v.usage.load(Ordering::SeqCst);
-                                    e.usage.fetch_max(v_usage, Ordering::SeqCst);
-                                })
-                                .or_insert(Arc::clone(v));
-                        }
+                    for (k, v) in &value.0 {
+                        pvalue
+                            .0
+                            .entry(Arc::clone(k))
+                            .and_modify(|e| {
+                                let v_usage = v.usage.load(Ordering::SeqCst);
+                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                            })
+                            .or_insert(Arc::clone(v));
                     }
 
-                    if TRACK_LINES.clone() {
-                        for (k, v) in &value.1 {
-                            pvalue
-                                .1
-                                .entry(*k)
-                                .and_modify(|e| {
-                                    let v_usage = v.usage.load(Ordering::SeqCst);
-                                    e.usage.fetch_max(v_usage, Ordering::SeqCst);
-                                })
-                                .or_insert(Arc::clone(v));
-                        }
+                    for (k, v) in &value.1 {
+                        pvalue
+                            .1
+                            .entry(*k)
+                            .and_modify(|e| {
+                                let v_usage = v.usage.load(Ordering::SeqCst);
+                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                            })
+                            .or_insert(Arc::clone(v));
                     }
 
                     if TRACK_BRANCHES.clone() {
@@ -176,17 +140,19 @@ pub fn merge_gcov(ires: Vec<GcovRes>) -> GcovRes {
     return res;
 }
 
+// fn interpret_gcov(json_data: &[u8]) -> ResultT<GcovRes> {
+//     let gcov_json: GcovJson = serde_json::from_slice(json_data)?;
+//
+//     let mut result: GcovRes = HashMap::new();
+//     for file in &gcov_json.files {
 fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     let mut result: GcovRes = HashMap::new();
 
     for file in &json.files {
         // Filter out libraries unless specified otherwise
-        if !ARGS.no_ignore_libs && file.file.starts_with("/usr/include") {
-            continue;
-        }
         let mut funcs: HashMap<Arc<String>, Arc<GcovFuncResult>> = HashMap::new();
-        if TRACK_FUNCS.clone() {
-            for function in &file.functions {
+        if let Some(fs) = &file.functions {
+            for function in fs {
                 let usage = (function.execution_count as u32 > 0) as u32;
                 let name = function.demangled_name.clone();
                 funcs.insert(
@@ -208,8 +174,8 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
         }
 
         let mut lines: HashMap<u32, Arc<GcovLineResult>> = HashMap::new();
-        if TRACK_LINES.clone() {
-            for line in &file.lines {
+        if let Some(ls) = &file.lines {
+            for line in ls {
                 let usage = (line.count as u32 > 0) as u32;
                 lines.insert(
                     line.line_number,
@@ -240,13 +206,6 @@ struct GcovJson {
     // format_version: String,
     // gcc_version: String,
     files: Vec<FileElement>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FileElement {
-    file: String,
-    functions: Vec<FunctionElement>,
-    lines: Vec<LineElement>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -298,4 +257,91 @@ struct ConditionElement {
     covered: u32,
     not_covered_true: Vec<u32>,
     not_covered_false: Vec<u32>,
+}
+
+#[derive(Debug)]
+struct FileElement {
+    file: String,
+    functions: Option<Vec<FunctionElement>>,
+    lines: Option<Vec<LineElement>>,
+}
+impl<'de> Deserialize<'de> for FileElement {
+    fn deserialize<D>(deserializer: D) -> Result<FileElement, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(FileElementVisitor)
+    }
+}
+
+struct FileElementVisitor;
+
+impl<'de> Visitor<'de> for FileElementVisitor {
+    type Value = FileElement;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a map representing FileElement")
+    }
+
+    fn visit_map<V>(self, mut map: V) -> Result<FileElement, V::Error>
+    where
+        V: MapAccess<'de>,
+    {
+        let mut functions = None;
+        let mut lines = None;
+
+        // A little hacky but we will enfore file to be parsed first, so we can skip parsing for
+        // system libraries which is enabled by default
+        let file = match map.next_key::<String>()?.unwrap().as_str() {
+            "file" => {
+                let next_value: String = map.next_value()?;
+                if !ARGS.no_ignore_libs && next_value.starts_with("/usr/include") {
+                    return Ok(FileElement {
+                        file: next_value,
+                        functions: None,
+                        lines: None,
+                    });
+                }
+                next_value
+            }
+            _ => return Err(de::Error::custom("file did not appear as first field!")),
+        };
+
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "functions" => {
+                    if functions.is_some() {
+                        return Err(de::Error::duplicate_field("functions"));
+                    }
+                    if TRACK_FUNCS.clone() {
+                        functions = Some(map.next_value()?);
+                    } else {
+                        // Skip the value
+                        let _ = map.next_value::<de::IgnoredAny>()?;
+                    }
+                }
+                "lines" => {
+                    if lines.is_some() {
+                        return Err(de::Error::duplicate_field("lines"));
+                    }
+                    if TRACK_LINES.clone() {
+                        lines = Some(map.next_value()?);
+                    } else {
+                        // Skip the value
+                        let _ = map.next_value::<de::IgnoredAny>()?;
+                    }
+                }
+                _ => {
+                    // Skip unknown fields
+                    let _ = map.next_value::<de::IgnoredAny>()?;
+                }
+            }
+        }
+
+        Ok(FileElement {
+            file,
+            functions,
+            lines,
+        })
+    }
 }
