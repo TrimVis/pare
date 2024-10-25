@@ -8,12 +8,13 @@ use log::error;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use serde_json;
-use serde_json::de::Deserializer as JsonDeserializer;
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::remove_file;
+use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
-use std::process::Command;
+use std::process::{exit, Command};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -27,7 +28,7 @@ pub type GcovRes = HashMap<
     ),
 >;
 
-const CHUNK_SIZE: usize = 10;
+const CHUNK_SIZE: usize = 20;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = match benchmark.prefix.clone() {
@@ -45,7 +46,7 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
     }
 
-    let mut ires = vec![];
+    let mut ires: Option<GcovRes> = None;
     for gcda_chunk in files.chunks(CHUNK_SIZE) {
         let mut gcno_symlinks = vec![];
         for gcda_file in gcda_chunk {
@@ -74,10 +75,39 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
             continue;
         }
 
-        let mut deserializer = JsonDeserializer::from_slice(output.stdout.as_slice());
+        // let mut deserializer = JsonDeserializer::from_slice(output.stdout.as_slice());
+        let reader = BufReader::new(output.stdout.as_slice());
 
-        while let Ok(gcov_json) = GcovJson::deserialize(&mut deserializer) {
-            ires.push(interpret_gcov(&gcov_json).expect("Error while interpreting gcov output"));
+        for line_result in reader.lines() {
+            match line_result {
+                Ok(line) => {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    match serde_json::from_str(&line) {
+                        Ok(gcov_json) => {
+                            let new_res = interpret_gcov(&gcov_json)
+                                .expect("Error while interpreting gcov output");
+                            match ires.borrow_mut() {
+                                Some(r) => {
+                                    merge_gcov(r, new_res);
+                                }
+                                None => {
+                                    ires = Some(new_res);
+                                }
+                            };
+                        }
+                        Err(e) => {
+                            error!("{}\n\nCould not parse GCOV json:\n{}", line, e);
+                            exit(1);
+                        }
+                    }
+                }
+                Err(_) => {
+                    error!("Could not parse GCOV output line")
+                }
+            }
         }
 
         // Delete the gcda file gcno file if it was symlinked
@@ -89,55 +119,51 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
     }
 
-    return merge_gcov(ires);
+    return ires.unwrap();
 }
 
-pub fn merge_gcov(ires: Vec<GcovRes>) -> GcovRes {
-    let mut res: GcovRes = HashMap::new();
-    for iires in ires {
-        for (key, value) in iires {
-            res.entry(key)
-                .and_modify(|pvalue| {
-                    for (k, v) in &value.0 {
-                        pvalue
-                            .0
-                            .entry(Arc::clone(k))
-                            .and_modify(|e| {
-                                let v_usage = v.usage.load(Ordering::SeqCst);
-                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
-                            })
-                            .or_insert(Arc::clone(v));
-                    }
+pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes) {
+    for (key, value) in res1 {
+        res0.entry(key)
+            .and_modify(|pvalue| {
+                for (k, v) in &value.0 {
+                    pvalue
+                        .0
+                        .entry(Arc::clone(k))
+                        .and_modify(|e| {
+                            let v_usage = v.usage.load(Ordering::SeqCst);
+                            e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                        })
+                        .or_insert(Arc::clone(v));
+                }
 
-                    for (k, v) in &value.1 {
-                        pvalue
-                            .1
-                            .entry(*k)
-                            .and_modify(|e| {
-                                let v_usage = v.usage.load(Ordering::SeqCst);
-                                e.usage.fetch_max(v_usage, Ordering::SeqCst);
-                            })
-                            .or_insert(Arc::clone(v));
-                    }
+                for (k, v) in &value.1 {
+                    pvalue
+                        .1
+                        .entry(*k)
+                        .and_modify(|e| {
+                            let v_usage = v.usage.load(Ordering::SeqCst);
+                            e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                        })
+                        .or_insert(Arc::clone(v));
+                }
 
-                    if TRACK_BRANCHES.clone() {
-                        unreachable!();
-                        // for (k, v) in value.2 {
-                        //     pvalue
-                        //         .2
-                        //         .entry(k)
-                        //         .and_modify(|_e| {
-                        //             if ARGS.mode == CoverageMode::Full {
-                        //             }
-                        //         })
-                        //         .or_insert(v);
-                        // }
-                    }
-                })
-                .or_insert(value);
-        }
+                if TRACK_BRANCHES.clone() {
+                    unreachable!();
+                    // for (k, v) in value.2 {
+                    //     pvalue
+                    //         .2
+                    //         .entry(k)
+                    //         .and_modify(|_e| {
+                    //             if ARGS.mode == CoverageMode::Full {
+                    //             }
+                    //         })
+                    //         .or_insert(v);
+                    // }
+                }
+            })
+            .or_insert(value);
     }
-    return res;
 }
 
 // fn interpret_gcov(json_data: &[u8]) -> ResultT<GcovRes> {
@@ -287,6 +313,7 @@ impl<'de> Visitor<'de> for FileElementVisitor {
     where
         V: MapAccess<'de>,
     {
+        let mut skip_remainder = false;
         let mut functions = None;
         let mut lines = None;
 
@@ -295,12 +322,11 @@ impl<'de> Visitor<'de> for FileElementVisitor {
         let file = match map.next_key::<String>()?.unwrap().as_str() {
             "file" => {
                 let next_value: String = map.next_value()?;
-                if !ARGS.no_ignore_libs && next_value.starts_with("/usr/include") {
-                    return Ok(FileElement {
-                        file: next_value,
-                        functions: None,
-                        lines: None,
-                    });
+                if !ARGS.no_ignore_libs
+                    && (next_value.starts_with("/usr/include")
+                        || next_value.starts_with(&ARGS.build_dir.display().to_string()))
+                {
+                    skip_remainder = true;
                 }
                 next_value
             }
@@ -309,7 +335,7 @@ impl<'de> Visitor<'de> for FileElementVisitor {
 
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
-                "functions" => {
+                "functions" if !skip_remainder => {
                     if functions.is_some() {
                         return Err(de::Error::duplicate_field("functions"));
                     }
@@ -320,7 +346,7 @@ impl<'de> Visitor<'de> for FileElementVisitor {
                         let _ = map.next_value::<de::IgnoredAny>()?;
                     }
                 }
-                "lines" => {
+                "lines" if !skip_remainder => {
                     if lines.is_some() {
                         return Err(de::Error::duplicate_field("lines"));
                     }

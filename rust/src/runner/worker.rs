@@ -12,6 +12,8 @@ use crossbeam::channel;
 use log::debug;
 use log::LevelFilter;
 use log::{error, info, warn};
+use std::borrow::BorrowMut;
+use std::cmp::min;
 use std::fs::create_dir_all;
 use std::mem;
 use std::path::Path;
@@ -163,17 +165,21 @@ impl Worker {
                 }
             };
             let mut db = db.unwrap();
-            status_sender
-                .send(ProcessingStatusMessage::Benchmarks(
-                    db.get_all_benchmarks()
-                        .expect("Could not retrieve benchmarks"),
-                ))
-                .unwrap();
+            let bench_count: u64 = {
+                let benchmarks = db
+                    .get_all_benchmarks()
+                    .expect("Could not retrieve benchmarks");
+                let count = benchmarks.len();
+                status_sender
+                    .send(ProcessingStatusMessage::Benchmarks(benchmarks))
+                    .unwrap();
+                count as u64
+            };
 
             // Batch process 100 results at once to decrease load on DB
-            const RESULT_BUF_CAPACITY: usize = 100;
-            let mut result_buf: Vec<GcovRes> = Vec::with_capacity(RESULT_BUF_CAPACITY);
-            let mut bench_counter = 0;
+            let max_bench_aggregate: u64 = min(100, bench_count);
+            let mut result_buf: Option<GcovRes> = None;
+            let mut bench_counter: u64 = 0;
 
             loop {
                 let job = receiver.recv();
@@ -195,16 +201,16 @@ impl Worker {
                             "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",
                             bench_id
                         );
-                            result_buf.push(gcov_result);
+                            match result_buf.borrow_mut() {
+                                None => {
+                                    result_buf = Some(gcov_result);
+                                }
+                                Some(r) => {
+                                    merge_gcov(r, gcov_result);
+                                }
+                            }
                         }
                         bench_counter += 1;
-                        // Only wake main thread every 20 benchmarks
-                        if bench_counter == 1 {
-                            status_sender
-                                .send(ProcessingStatusMessage::BenchesDone(bench_counter))
-                                .expect("Could not update bench status");
-                            bench_counter = 0;
-                        }
                         if log::max_level() >= LevelFilter::Debug {
                             debug!(
                                 "[DB Writer] Processed result in {}ms (bench_id: {})",
@@ -223,35 +229,33 @@ impl Worker {
                     }
                 }
 
-                if result_buf.len() == RESULT_BUF_CAPACITY {
-                    info!(
-                        "[DB Writer] Merging buffered gcov results & writing to DB. (buf_size: {})",
-                        RESULT_BUF_CAPACITY
-                    );
+                if bench_counter >= max_bench_aggregate {
+                    // Only wake main thread every 20 benchmarks
+                    status_sender
+                        .send(ProcessingStatusMessage::BenchesDone(bench_counter))
+                        .expect("Could not update bench status");
+                    info!("[DB Writer] Writing merged GCOV results to DB");
                     let start = if log::max_level() >= LevelFilter::Debug {
                         Some(Instant::now())
                     } else {
                         None
                     };
-                    let result = merge_gcov(result_buf);
-                    let start = if log::max_level() >= LevelFilter::Debug {
-                        debug!(
-                            "[DB Writer] Merged GCOV results in {}ms",
-                            start.unwrap().elapsed().as_millis()
-                        );
-                        Some(Instant::now())
-                    } else {
-                        None
+                    match result_buf {
+                        Some(r) => db
+                            .add_gcov_measurement(r)
+                            .expect("Could not add gcov measurement"),
+                        None => error!("No results to write out"),
                     };
-                    db.add_gcov_measurement(result)
-                        .expect("Could not add gcov measurement");
-                    result_buf = Vec::with_capacity(RESULT_BUF_CAPACITY);
+
                     if log::max_level() >= LevelFilter::Debug {
                         debug!(
                             "[DB Writer] Inserted merged GCOV result in {}ms",
                             start.unwrap().elapsed().as_millis()
                         );
                     }
+
+                    result_buf = None;
+                    bench_counter = 0;
                 }
             }
 
