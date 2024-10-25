@@ -25,7 +25,7 @@ pub type GcovRes = HashMap<
     ),
 >;
 
-const CHUNK_SIZE: usize = 20;
+const CHUNK_SIZE: usize = 1;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let prefix_dir = match benchmark.prefix.clone() {
@@ -72,20 +72,27 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
             continue;
         }
 
-        let reader = BufReader::new(output.stdout.as_slice());
+        if CHUNK_SIZE == 1 {
+            let gcov_json: GcovJson = serde_json::from_slice(output.stdout.as_slice())
+                .expect("Error parsing gcov json output");
 
-        // Read lines from the stdout
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let gcov_json: GcovJson =
-                        serde_json::from_str(&line).expect("Error parsing gcov json output");
+            ires.push(interpret_gcov(&gcov_json).expect("Error while interpreting gcov output"));
+        } else {
+            // Read lines from the stdout
+            let reader = BufReader::new(output.stdout.as_slice());
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        let gcov_json: GcovJson =
+                            serde_json::from_str(&line).expect("Error parsing gcov json output");
 
-                    ires.push(
-                        interpret_gcov(&gcov_json).expect("Error while interpreting gcov output"),
-                    );
+                        ires.push(
+                            interpret_gcov(&gcov_json)
+                                .expect("Error while interpreting gcov output"),
+                        );
+                    }
+                    Err(_) => error!("An error occurred while reading the output lines of gcov"),
                 }
-                Err(_) => error!("An error occurred while reading the output lines of gcov"),
             }
         }
 

@@ -9,7 +9,6 @@ use crate::types::ResultT;
 use dur::Duration as DurDuration;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
-use log::LevelFilter;
 pub use log::{error, info, warn};
 use multiwriter::MultiWriter;
 use std::fs::{remove_dir_all, File};
@@ -44,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logger Setup
     let logger = env_logger::Builder::from_default_env()
         .target(env_logger::Target::Pipe(log_target))
-        .filter(None, LevelFilter::Info) // Set default log level to Info
         .format_level(true)
         .format_timestamp_secs()
         .build();
@@ -95,8 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!(" {}", eta_msg);
         }
 
-        runner.wait_for_next_bench_done();
-        done_count += 1;
+        done_count += runner.wait_for_next_bench_done() as usize;
         // Early return in case of Ctrl+C or in case we already completed all tasks
         if !running.load(Ordering::SeqCst) || done_count == total_count {
             break;

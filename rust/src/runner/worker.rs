@@ -10,6 +10,7 @@ use crate::ARGS;
 
 use crossbeam::channel;
 use log::debug;
+use log::LevelFilter;
 use log::{error, info, warn};
 use std::fs::create_dir_all;
 use std::mem;
@@ -38,27 +39,40 @@ impl Worker {
                 match job {
                     Ok(RunnerQueueMessage::Start(benchmark)) => {
                         info!("[Worker {}] Received job (bench_id: {})", id, benchmark.id);
-                        let start = Instant::now();
+                        let start = if log::max_level() >= LevelFilter::Debug {
+                            Some(Instant::now())
+                        } else {
+                            None
+                        };
                         let cvc5_result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
                         let res_exit = cvc5_result.exit_code;
-                        debug!(
-                            "[Worker {}] Ran cvc5 in {}ms (bench_id: {})",
-                            id,
-                            start.elapsed().as_millis(),
-                            benchmark.id
-                        );
+                        if log::max_level() >= LevelFilter::Debug {
+                            debug!(
+                                "[Worker {}] Ran cvc5 in {}ms (bench_id: {})",
+                                id,
+                                start.unwrap().elapsed().as_millis(),
+                                benchmark.id
+                            );
+                        }
 
                         let bench_id = benchmark.id;
                         // Coverage reports are not a thing if the process didn't terminate gracefully
                         if res_exit == 0 {
-                            let start = Instant::now();
+                            let start = if log::max_level() >= LevelFilter::Debug {
+                                Some(Instant::now())
+                            } else {
+                                None
+                            };
                             let gcov_result = gcov::process(&benchmark);
-                            debug!(
-                                "[Worker {}] Processed & ran gcov in {}ms (bench_id: {})",
-                                id,
-                                start.elapsed().as_millis(),
-                                benchmark.id
-                            );
+
+                            if log::max_level() >= LevelFilter::Debug {
+                                debug!(
+                                    "[Worker {}] Processed & ran gcov in {}ms (bench_id: {})",
+                                    id,
+                                    start.unwrap().elapsed().as_millis(),
+                                    benchmark.id
+                                );
+                            }
                             match processing_queue.send(ProcessingQueueMessage::Result(
                                 benchmark.id,
                                 cvc5_result,
@@ -159,12 +173,17 @@ impl Worker {
             // Batch process 100 results at once to decrease load on DB
             const RESULT_BUF_CAPACITY: usize = 100;
             let mut result_buf: Vec<GcovRes> = Vec::with_capacity(RESULT_BUF_CAPACITY);
+            let mut bench_counter = 0;
 
             loop {
                 let job = receiver.recv();
                 match job {
                     Ok(ProcessingQueueMessage::Result(bench_id, cvc5_result, gcov_result)) => {
-                        let start = Instant::now();
+                        let start = if log::max_level() >= LevelFilter::Debug {
+                            Some(Instant::now())
+                        } else {
+                            None
+                        };
                         info!("[DB Writer] Received a result (bench_id: {})", bench_id);
                         debug!(
                             "[DB Writer] Writing cvc5 result to DB (bench_id: {})",
@@ -178,14 +197,21 @@ impl Worker {
                         );
                             result_buf.push(gcov_result);
                         }
-                        status_sender
-                            .send(ProcessingStatusMessage::BenchDone(bench_id))
-                            .expect("Could not update bench status");
-                        debug!(
-                            "[DB Writer] Processed result in {}ms (bench_id: {})",
-                            start.elapsed().as_millis(),
-                            bench_id
-                        );
+                        bench_counter += 1;
+                        // Only wake main thread every 20 benchmarks
+                        if bench_counter == 1 {
+                            status_sender
+                                .send(ProcessingStatusMessage::BenchesDone(bench_counter))
+                                .expect("Could not update bench status");
+                            bench_counter = 0;
+                        }
+                        if log::max_level() >= LevelFilter::Debug {
+                            debug!(
+                                "[DB Writer] Processed result in {}ms (bench_id: {})",
+                                start.unwrap().elapsed().as_millis(),
+                                bench_id
+                            );
+                        }
                     }
                     Ok(ProcessingQueueMessage::Stop) => {
                         warn!("[DB Writer] received stop signal; shutting down.");
@@ -202,26 +228,41 @@ impl Worker {
                         "[DB Writer] Merging buffered gcov results & writing to DB. (buf_size: {})",
                         RESULT_BUF_CAPACITY
                     );
-                    let start = Instant::now();
+                    let start = if log::max_level() >= LevelFilter::Debug {
+                        Some(Instant::now())
+                    } else {
+                        None
+                    };
                     let result = merge_gcov(result_buf);
-                    debug!(
-                        "[DB Writer] Merged GCOV results in {}ms",
-                        start.elapsed().as_millis()
-                    );
-                    let start = Instant::now();
+                    let start = if log::max_level() >= LevelFilter::Debug {
+                        debug!(
+                            "[DB Writer] Merged GCOV results in {}ms",
+                            start.unwrap().elapsed().as_millis()
+                        );
+                        Some(Instant::now())
+                    } else {
+                        None
+                    };
                     db.add_gcov_measurement(result)
                         .expect("Could not add gcov measurement");
                     result_buf = Vec::with_capacity(RESULT_BUF_CAPACITY);
-                    debug!(
-                        "[DB Writer] Inserted merged GCOV result in {}ms",
-                        start.elapsed().as_millis()
-                    );
+                    if log::max_level() >= LevelFilter::Debug {
+                        debug!(
+                            "[DB Writer] Inserted merged GCOV result in {}ms",
+                            start.unwrap().elapsed().as_millis()
+                        );
+                    }
                 }
             }
 
+            status_sender
+                .send(ProcessingStatusMessage::BenchesDone(bench_counter))
+                .expect("Could not update bench status");
+
             db.write_to_disk()
                 .expect("Issue while writing result db to disk");
-            warn!("[DB Writer] Terminated.");
+
+            info!("[DB Writer] Terminated.");
         });
 
         Worker {

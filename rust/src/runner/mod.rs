@@ -24,7 +24,7 @@ enum ProcessingQueueMessage {
 enum ProcessingStatusMessage {
     DbInitSuccess,
     DbInitError,
-    BenchDone(u64),
+    BenchesDone(u64),
     Benchmarks(Vec<Benchmark>),
 }
 
@@ -96,7 +96,7 @@ impl Runner {
 
     pub fn wait_for_next_bench_done(&mut self) -> u64 {
         match self.processing_status_queue.recv().unwrap() {
-            ProcessingStatusMessage::BenchDone(res) => res,
+            ProcessingStatusMessage::BenchesDone(res) => res,
             _ => unreachable!("This message was not expected!"),
         }
     }
