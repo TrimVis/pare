@@ -60,7 +60,7 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
 
         let chunk_args: Vec<&str> = gcda_chunk.iter().map(|p| p.to_str().unwrap()).collect();
-        let args = ["--json", "--stdout"]; // gcda_file.to_str().unwrap()];
+        let args = ["--json-format", "--stdout"]; // gcda_file.to_str().unwrap()];
         let output = Command::new("gcov")
             .args(&args)
             .args(&chunk_args)
@@ -175,6 +175,14 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     let mut result: GcovRes = HashMap::new();
 
     for file in &json.files {
+        // Ignore include files and build dir files, as we can not optimize over them anyways
+        if !ARGS.no_ignore_libs
+            && (file.file.starts_with("/usr/include")
+                || file.file.starts_with(&ARGS.build_dir.display().to_string()))
+        {
+            continue;
+        }
+
         // Filter out libraries unless specified otherwise
         let mut funcs: HashMap<Arc<String>, Arc<GcovFuncResult>> = HashMap::new();
         if let Some(fs) = &file.functions {
@@ -313,29 +321,19 @@ impl<'de> Visitor<'de> for FileElementVisitor {
     where
         V: MapAccess<'de>,
     {
-        let mut skip_remainder = false;
         let mut functions = None;
         let mut lines = None;
-
-        // A little hacky but we will enfore file to be parsed first, so we can skip parsing for
-        // system libraries which is enabled by default
-        let file = match map.next_key::<String>()?.unwrap().as_str() {
-            "file" => {
-                let next_value: String = map.next_value()?;
-                if !ARGS.no_ignore_libs
-                    && (next_value.starts_with("/usr/include")
-                        || next_value.starts_with(&ARGS.build_dir.display().to_string()))
-                {
-                    skip_remainder = true;
-                }
-                next_value
-            }
-            _ => return Err(de::Error::custom("file did not appear as first field!")),
-        };
+        let mut file = None;
 
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
-                "functions" if !skip_remainder => {
+                "file" => {
+                    if file.is_some() {
+                        return Err(de::Error::duplicate_field("file"));
+                    }
+                    file = Some(map.next_value()?);
+                }
+                "functions" => {
                     if functions.is_some() {
                         return Err(de::Error::duplicate_field("functions"));
                     }
@@ -346,7 +344,7 @@ impl<'de> Visitor<'de> for FileElementVisitor {
                         let _ = map.next_value::<de::IgnoredAny>()?;
                     }
                 }
-                "lines" if !skip_remainder => {
+                "lines" => {
                     if lines.is_some() {
                         return Err(de::Error::duplicate_field("lines"));
                     }
@@ -364,8 +362,12 @@ impl<'de> Visitor<'de> for FileElementVisitor {
             }
         }
 
+        if file.is_none() {
+            return Err(de::Error::missing_field("file"));
+        }
+
         Ok(FileElement {
-            file,
+            file: file.unwrap(),
             functions,
             lines,
         })
