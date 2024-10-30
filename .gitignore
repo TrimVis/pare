@@ -19,4 +19,5 @@ __pycache__
 output.log
 gurobi.lic
 rustup_installer.sh
+/just
 
