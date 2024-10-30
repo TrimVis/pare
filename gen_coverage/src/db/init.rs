@@ -72,8 +72,10 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
                 end_line INTEGER NOT NULL,
                 end_col INTEGER NOT NULL,
                 benchmark_usage_count INTEGER NOT NULL,
-                UNIQUE(source_id, name)
+                UNIQUE(source_id, start_line, start_col)
             )";
+        //      UNIQUE(source_id, name)
+        //  )";
         conn.execute(&func_table, [])
             .expect("Issue during functions table creation");
     }

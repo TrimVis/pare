@@ -20,4 +20,5 @@ output.log
 gurobi.lic
 rustup_installer.sh
 /just
+/sync_to_remote.sh
 
