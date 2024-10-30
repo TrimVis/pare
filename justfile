@@ -10,10 +10,11 @@ reportsdir := "reports"
 
 system_python := "python3"
 python := ".venv/bin/python3"
+cargo := ".cargo/bin/cargo"
+cargo_env := ".cargo"
 
 alias b := build
 alias g := gen_report
-alias e := eval_report
 alias o := optimize
 
 # TODO pjordan: Add this
@@ -24,39 +25,54 @@ alias o := optimize
 
 
 # Clones and builds cvc5 with coverage support
-build:
+build-cvc5:
     mkdir -p "{{cvc5dir}}"
     if test ! -d "{{cvc5git}}"; then git clone --depth 1 "{{cvc5repo}}" "{{cvc5dir}}"; fi
 
     cd {{cvc5dir}} && ./configure.sh debug --auto-download --coverage --poly --cocoa --gpl
     cd "{{cvc5dir}}/build" && make -j $(nproc)
 
-coverage-reset:
+build-rust: setup-rust
+    cd "gen_coverage" && CARGO_HOME="../{{cargo_env}}" RUSTFLAGS='-C target-cpu=native' ../{{cargo}} build --release
+
+build: build-cvc5 build-rust
+
+tidy:
+    rm -rf /tmp/coverage_reports
     cd "{{cvc5dir}}/build" && make coverage-reset
 
-setup:
+setup-python:
     #!/usr/bin/env sh
     if test ! -e .venv; then
         {{ system_python }} -m venv .venv; 
         {{ python }} -m pip install --upgrade pip
-        {{ python }} -m pip install -r ./requirements.txt
+        {{ python }} -m pip install -r ./optimization/requirements.txt
+        {{ python }} -m pip install -r ./code_remover/requirements.txt
     fi
 
-# Generate a coverage report
-gen_report TLIMIT="4000" SAMPLE="all" CORES=num_cpus(): setup
-    {{ python }} -m gen_coverage \
-        -i \
-        -n "{{SAMPLE}}" -j {{CORES}} \
-        -b ../cvc5-repo/build/ \
-        -a "--tlimit {{TLIMIT}}" \
-        "{{benchdir}}" \
-        "{{reportsdir}}/tlimit{{TLIMIT}}"
-    @echo "Created report at '{{reportsdir}}/tlimit{{TLIMIT}}'"
+setup-rust:
+    #!/usr/bin/env sh
+    # Sets up a local rust installation (portability reasons)
+    if test ! -e .cargo; then
+        export CARGO_HOME="{{cargo_env}}";
+        export RUSTUP_HOME="{{cargo_env}}" ;
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup_installer.sh;
+        bash ./rustup_installer.sh -y --no-modify-path --no-update-default-toolchain;
+        rm rustup_installer.sh
+    fi
 
-# Evaluate a coverage report
-eval_report COVERAGE_FILE=(reportsdir / "tlimit4000/sall_1_coverage.json"): setup
-    {{ python }} eval_coverage_json.py db generate --input={{COVERAGE_FILE}} --src_code={{ cvc5dir }}
+setup: setup-python setup-rust
+
+# Generate a coverage report
+gen_report CORES=num_cpus(): build-rust
+    ./gen_coverage/target/release/gen_coverage \
+        -i -j {{CORES}} \
+        --build-dir ../cvc5-repo/build/ \
+        --coverage-kinds functions \
+        "{{benchdir}}" \
+        "{{reportsdir}}/report.sqlite"
+    @echo "Created report at '{{reportsdir}}/report.sqlite'"
 
 # Optimize 
 optimize: setup
-    {{ python }} optimization.py
+    {{ python }} optimization/optimization.py

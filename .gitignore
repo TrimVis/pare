@@ -3,6 +3,7 @@
 /reports/
 /venv/
 /.venv/
+/.cargo/
 /old/
 target/
 __pycache__
@@ -17,4 +18,5 @@ __pycache__
 *.backup
 output.log
 gurobi.lic
+rustup_installer.sh
 

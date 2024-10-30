@@ -1,5 +1,6 @@
 # Master Thesis - Variant 2
 ### cvc5 minimal trust core
+> This README is significantly out of date, use the justfile as reference for now
 
 ## Idea
 > By testing various problem statements determine a "common code subset".
