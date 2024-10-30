@@ -141,6 +141,9 @@ impl DbWriter {
                 {
                     let mut batch_query = String::new();
                     for func in chunk {
+                        // NOTE: As the function name also contains the parameter types,
+                        // overloading kind of breaks the names and they should be used with care
+                        // ON CONFLICT (source_id, name) DO UPDATE
                         batch_query.push_str(&format!(
                             "INSERT INTO \"functions\" (
                             source_id,
@@ -151,7 +154,7 @@ impl DbWriter {
                             end_col,
                             benchmark_usage_count
                         ) VALUES ('{}', '{}', {}, {}, {}, {}, {}) 
-                        ON CONFLICT (source_id, name) DO UPDATE 
+                        ON CONFLICT (source_id, start_line, start_col) DO UPDATE 
                         SET benchmark_usage_count = benchmark_usage_count + excluded.benchmark_usage_count;",
                             sid.to_string(),
                             func.name.to_string(),

@@ -166,11 +166,6 @@ pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes) {
     }
 }
 
-// fn interpret_gcov(json_data: &[u8]) -> ResultT<GcovRes> {
-//     let gcov_json: GcovJson = serde_json::from_slice(json_data)?;
-//
-//     let mut result: GcovRes = HashMap::new();
-//     for file in &gcov_json.files {
 fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     let mut result: GcovRes = HashMap::new();
 
@@ -340,7 +335,6 @@ impl<'de> Visitor<'de> for FileElementVisitor {
                     if TRACK_FUNCS.clone() {
                         functions = Some(map.next_value()?);
                     } else {
-                        // Skip the value
                         let _ = map.next_value::<de::IgnoredAny>()?;
                     }
                 }
@@ -351,7 +345,6 @@ impl<'de> Visitor<'de> for FileElementVisitor {
                     if TRACK_LINES.clone() {
                         lines = Some(map.next_value()?);
                     } else {
-                        // Skip the value
                         let _ = map.next_value::<de::IgnoredAny>()?;
                     }
                 }
