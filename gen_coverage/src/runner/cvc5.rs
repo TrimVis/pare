@@ -19,10 +19,10 @@ pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Cvc5Bench
     let duration = start.elapsed();
 
     let stderr = String::from_utf8(output.stderr).unwrap();
-    if !output.status.success() {
+    if !output.status.success() && output.status.code().unwrap_or(0) != 6 {
         error!(
-            "CVC5 failed with error!\n Benchmark File: {:?} \n ERROR: {:?}",
-            &benchmark.path, &stderr
+            "CVC5 failed with error ({:?})!\n Benchmark File: {:?} \n ERROR: {:?}",
+            output.status, &benchmark.path, &stderr
         );
         error!(
             "Args: {:?}",
