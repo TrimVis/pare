@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while done_count < total_count {
         let eta_msg = if done_count > 0 {
             let avg_entry_dur = loop_start.elapsed() / done_count.try_into().unwrap();
-            let eta = avg_entry_dur * total_count.try_into().unwrap();
+            let eta = avg_entry_dur * (total_count - done_count).try_into().unwrap();
             format!("ETA: {}", DurDuration::from(eta))
         } else {
             "ETA: ?".to_string()
