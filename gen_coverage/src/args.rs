@@ -84,7 +84,7 @@ pub struct CliArgs {
 
     // TODO: Fix that you can't really pass the argument atm
     /// Arguments for cvc5
-    #[arg(short = 'a', long, default_value = "--tlimit 2000")]
+    #[arg(short = 'a', long, default_value = "--tlimit 5000")]
     pub cvc5_args: String,
 
     /// Kinds of code elements for which usage data will be collected

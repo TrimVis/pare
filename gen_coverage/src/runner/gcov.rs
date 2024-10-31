@@ -112,14 +112,21 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
 
         // Delete the gcda file gcno file if it was symlinked
         for gcda_file in gcda_chunk {
-            remove_file(gcda_file).unwrap();
+            remove_file(gcda_file)
+                .unwrap_or_else(|e| error!("Could not remove gcda file: {:?}", e));
         }
         for gcno_symlink in gcno_symlinks {
-            remove_file(gcno_symlink).unwrap();
+            remove_file(gcno_symlink)
+                .unwrap_or_else(|e| error!("Could not remove symlink: {:?}", e));
         }
     }
 
-    return ires.unwrap();
+    if ires.is_some() {
+        ires.unwrap()
+    } else {
+        error!("No result created...");
+        HashMap::new()
+    }
 }
 
 pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes) {

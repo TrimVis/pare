@@ -15,6 +15,7 @@ use log::{error, info, warn};
 use std::borrow::BorrowMut;
 use std::cmp::min;
 use std::fs::create_dir_all;
+use std::fs::remove_dir_all;
 use std::mem;
 use std::path::Path;
 use std::process::exit;
@@ -75,6 +76,15 @@ impl Worker {
                                     benchmark.id
                                 );
                             }
+
+                            // Remove prefix directory
+                            match &benchmark.prefix {
+                                None => (),
+                                Some(v) => remove_dir_all(v).unwrap_or_else(|e| {
+                                    debug!("Could not delete prefix dir: {:?}", e)
+                                }),
+                            };
+
                             match processing_queue.send(ProcessingQueueMessage::Result(
                                 benchmark.id,
                                 cvc5_result,
