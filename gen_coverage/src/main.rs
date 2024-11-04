@@ -5,6 +5,7 @@ mod runner;
 mod types;
 use crate::args::ARGS;
 use crate::types::ResultT;
+use std::cmp::min;
 
 use dur::Duration as DurDuration;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -74,6 +75,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for b in benchmarks {
         runner.enqueue(b);
     }
+    // Ensure that workers terminate after all things have been processed
+    runner.enqueue_worker_stop();
 
     let mut done_count = 0;
     done_pb.reset_elapsed();
@@ -88,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         done_pb.set_message(eta_msg.clone());
         done_pb.set_position(done_count as u64);
-        if done_count % 100 == 0 {
+        if done_count % min(ARGS.job_size, 100) == 0 {
             info!(" Processed {}/{} Benchmark Files", done_count, total_count);
             info!(" {}", eta_msg);
         }
@@ -103,8 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     done_pb.finish_with_message("Processed all files");
 
     info!("Gracefully terminating all workers");
-    // Send stop signal (this is safe now, as the queue has been worked of)
-    runner.stop();
+
     // Wait for runners to work of the queue
     runner.join();
 

@@ -2,7 +2,7 @@ mod cvc5;
 mod gcov;
 mod worker;
 pub use gcov::GcovRes;
-use log::warn;
+use log::{error, info, warn};
 
 use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
@@ -111,15 +111,12 @@ impl Runner {
         }
     }
 
-    // Due to circular dependency between workers, use this with care, it will crash
-    pub fn stop(&mut self) {
-        // FIXME: This is a hack
+    pub fn enqueue_worker_stop(&mut self) {
         for _ in &self.runner_workers {
-            self.runner_queue.send(RunnerQueueMessage::Stop).unwrap();
+            self.runner_queue
+                .send(RunnerQueueMessage::Stop)
+                .unwrap_or_else(|e| error!("Could not stop worker: {}", e));
         }
-        self.processing_queue
-            .send(ProcessingQueueMessage::Stop)
-            .unwrap();
     }
 
     pub fn join(&mut self) {

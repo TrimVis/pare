@@ -190,8 +190,13 @@ impl Worker {
             let max_bench_aggregate: u64 = min(100, bench_count);
             let mut result_buf: Option<GcovRes> = None;
             let mut bench_counter: u64 = 0;
+            let mut rem_counter: u64 = bench_count;
 
             loop {
+                if rem_counter == 0 {
+                    info!("[DB Writer] Processed all benchmarks, breaking out of message loop");
+                    break;
+                }
                 let job = receiver.recv();
                 match job {
                     Ok(ProcessingQueueMessage::Result(bench_id, cvc5_result, gcov_result)) => {
@@ -221,6 +226,7 @@ impl Worker {
                             }
                         }
                         bench_counter += 1;
+                        rem_counter -= 1;
                         if log::max_level() >= LevelFilter::Debug {
                             debug!(
                                 "[DB Writer] Processed result in {}ms (bench_id: {})",
@@ -241,9 +247,6 @@ impl Worker {
 
                 if bench_counter >= max_bench_aggregate {
                     // Only wake main thread every 20 benchmarks
-                    status_sender
-                        .send(ProcessingStatusMessage::BenchesDone(bench_counter))
-                        .expect("Could not update bench status");
                     info!("[DB Writer] Writing merged GCOV results to DB");
                     let start = if log::max_level() >= LevelFilter::Debug {
                         Some(Instant::now())
@@ -264,11 +267,20 @@ impl Worker {
                         );
                     }
 
+                    status_sender
+                        .send(ProcessingStatusMessage::BenchesDone(bench_counter))
+                        .expect("Could not update bench status");
+
                     result_buf = None;
                     bench_counter = 0;
                 }
             }
 
+            info!("[DB Writer] Cleaning up.");
+            if let Some(r) = result_buf {
+                db.add_gcov_measurement(r)
+                    .expect("Could not add gcov measurement");
+            };
             status_sender
                 .send(ProcessingStatusMessage::BenchesDone(bench_counter))
                 .expect("Could not update bench status");

@@ -1,11 +1,11 @@
 
 cvc5dir := "../cvc5-repo"
-cvc5repo := "git@github.com:TrimVis/master-tiny-cvc5.git"
+cvc5repo := "https://github.com/cvc5/cvc5.git"
 cvc5git := cvc5dir / ".git"
 cvc5build := cvc5dir / "build"
 
 benchurl := "https://zenodo.org/api/records/11061097/files-archive"
-benchdir := "benchmarks/nonincremental_2024.04.23/non-incremental/"
+benchdir := "benchmarks/nonincremental_2024.04.23/"
 reportsdir := "reports"
 
 system_python := "python3"
@@ -17,11 +17,17 @@ alias b := build
 alias g := gen_report
 alias o := optimize
 
-# TODO pjordan: Add this
-# download_bench:
-#     mkdir -p "{{benchdir}}"
-#     wget "{{benchurl}}" -o benchmark.tar
-#     tar -xf *.tar.zst
+download_bench:
+    mkdir -p "{{benchdir}}"
+    rm files-archive
+    # Downloading benchmarks, this may take a bit (~4.5GB download)
+    wget "{{benchurl}}" --show-progress
+    # Unpacking archive
+    unzip files-archive -d "{{benchdir}}" && rm files-archive
+    # Unpacking compressed test files
+    cd "{{benchdir}}" && for file in *.tar.zst; do \
+        tar --zstd -xf $file && rm $file; \
+    done
 
 
 # Clones and builds cvc5 with coverage support
