@@ -2,7 +2,7 @@ mod cvc5;
 mod gcov;
 mod worker;
 pub use gcov::GcovRes;
-use log::{error, info, warn};
+use log::{error, warn};
 
 use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
@@ -16,10 +16,7 @@ enum RunnerQueueMessage {
     Stop,
 }
 
-enum ProcessingQueueMessage {
-    Result(u64, Cvc5BenchmarkRun, Option<GcovRes>),
-    Stop,
-}
+type ProcessingQueueMessage = (u64, Cvc5BenchmarkRun, Option<GcovRes>);
 
 enum ProcessingStatusMessage {
     DbInitSuccess,
@@ -34,7 +31,6 @@ pub struct Runner {
 
     processing_status_queue: channel::Receiver<ProcessingStatusMessage>,
     processing_worker: worker::Worker,
-    processing_queue: channel::Sender<ProcessingQueueMessage>,
 
     enqueued: Box<HashSet<u64>>,
 }
@@ -69,7 +65,6 @@ impl Runner {
             runner_queue,
 
             processing_worker,
-            processing_queue,
             processing_status_queue: p_status_receiver,
 
             enqueued: Box::from(HashSet::new()),

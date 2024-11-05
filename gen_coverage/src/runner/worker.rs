@@ -5,6 +5,7 @@ use super::ProcessingStatusMessage;
 use super::RunnerQueueMessage;
 use crate::db::DbWriter;
 use crate::runner::gcov::merge_gcov;
+use crate::runner::gcov::MergeKind;
 use crate::runner::GcovRes;
 use crate::ARGS;
 
@@ -85,7 +86,7 @@ impl Worker {
                                 }),
                             };
 
-                            match processing_queue.send(ProcessingQueueMessage::Result(
+                            match processing_queue.send((
                                 benchmark.id,
                                 cvc5_result,
                                 Some(gcov_result),
@@ -102,11 +103,7 @@ impl Worker {
                                 }
                             }
                         } else {
-                            match processing_queue.send(ProcessingQueueMessage::Result(
-                                benchmark.id,
-                                cvc5_result,
-                                None,
-                            )) {
+                            match processing_queue.send((benchmark.id, cvc5_result, None)) {
                                 Ok(_) => {
                                     debug!(
                                         "[Worker {}] Queued GCOV result (bench_id: {})",
@@ -197,9 +194,10 @@ impl Worker {
                     info!("[DB Writer] Processed all benchmarks, breaking out of message loop");
                     break;
                 }
+
                 let job = receiver.recv();
                 match job {
-                    Ok(ProcessingQueueMessage::Result(bench_id, cvc5_result, gcov_result)) => {
+                    Ok((bench_id, cvc5_result, gcov_result)) => {
                         let start = if log::max_level() >= LevelFilter::Debug {
                             Some(Instant::now())
                         } else {
@@ -221,7 +219,7 @@ impl Worker {
                                     result_buf = Some(gcov_result);
                                 }
                                 Some(r) => {
-                                    merge_gcov(r, gcov_result);
+                                    merge_gcov(r, gcov_result, MergeKind::SUM);
                                 }
                             }
                         }
@@ -234,10 +232,6 @@ impl Worker {
                                 bench_id
                             );
                         }
-                    }
-                    Ok(ProcessingQueueMessage::Stop) => {
-                        warn!("[DB Writer] received stop signal; shutting down.");
-                        break;
                     }
                     Err(_) => {
                         warn!("[DB Writer] Disconnected; shutting down.");

@@ -9,22 +9,21 @@ use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use serde_json;
 use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::remove_file;
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
 use std::process::{exit, Command};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
 
 // Maps from SrcFileName -> Line/Function/Branch Identifier -> Result
 pub type GcovRes = HashMap<
-    Arc<String>,
+    Box<String>,
     (
-        HashMap<Arc<String>, Arc<GcovFuncResult>>,
-        HashMap<u32, Arc<GcovLineResult>>,
-        HashMap<u32, Arc<GcovBranchResult>>,
+        HashMap<Box<String>, RefCell<GcovFuncResult>>,
+        HashMap<u32, RefCell<GcovLineResult>>,
+        HashMap<u32, RefCell<GcovBranchResult>>,
     ),
 >;
 
@@ -91,7 +90,7 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
                                 .expect("Error while interpreting gcov output");
                             match ires.borrow_mut() {
                                 Some(r) => {
-                                    merge_gcov(r, new_res);
+                                    merge_gcov(r, new_res, MergeKind::MAX);
                                 }
                                 None => {
                                     ires = Some(new_res);
@@ -129,19 +128,31 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     }
 }
 
-pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes) {
+#[derive(PartialEq)]
+pub enum MergeKind {
+    SUM,
+    MAX,
+}
+
+pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes, kind: MergeKind) {
     for (key, value) in res1 {
-        res0.entry(key)
+        res0.borrow_mut()
+            .entry(key)
             .and_modify(|pvalue| {
                 for (k, v) in &value.0 {
                     pvalue
                         .0
-                        .entry(Arc::clone(k))
+                        .entry(k.clone())
                         .and_modify(|e| {
-                            let v_usage = v.usage.load(Ordering::SeqCst);
-                            e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                            let v_usage = v.borrow().usage;
+                            let e = e.get_mut();
+                            e.usage = if kind == MergeKind::MAX {
+                                e.usage.max(v_usage)
+                            } else {
+                                e.usage + v_usage
+                            };
                         })
-                        .or_insert(Arc::clone(v));
+                        .or_insert(RefCell::clone(v));
                 }
 
                 for (k, v) in &value.1 {
@@ -149,10 +160,16 @@ pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes) {
                         .1
                         .entry(*k)
                         .and_modify(|e| {
-                            let v_usage = v.usage.load(Ordering::SeqCst);
-                            e.usage.fetch_max(v_usage, Ordering::SeqCst);
+                            let v_usage = v.borrow().usage;
+                            let e = e.get_mut();
+                            let new_val = if kind == MergeKind::MAX {
+                                e.usage.max(v_usage)
+                            } else {
+                                e.usage + v_usage
+                            };
+                            e.usage = new_val;
                         })
-                        .or_insert(Arc::clone(v));
+                        .or_insert(RefCell::clone(v));
                 }
 
                 if TRACK_BRANCHES.clone() {
@@ -186,14 +203,14 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
         }
 
         // Filter out libraries unless specified otherwise
-        let mut funcs: HashMap<Arc<String>, Arc<GcovFuncResult>> = HashMap::new();
+        let mut funcs: HashMap<Box<String>, RefCell<GcovFuncResult>> = HashMap::new();
         if let Some(fs) = &file.functions {
             for function in fs {
                 let usage = (function.execution_count as u32 > 0) as u32;
                 let name = function.demangled_name.clone();
                 funcs.insert(
-                    Arc::from(name.clone()),
-                    Arc::from(GcovFuncResult {
+                    Box::from(name.clone()),
+                    RefCell::from(GcovFuncResult {
                         name,
                         start: FilePosition {
                             line: function.start_line,
@@ -203,33 +220,33 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
                             line: function.end_line,
                             col: function.end_column,
                         },
-                        usage: AtomicU32::from(usage),
+                        usage,
                     }),
                 );
             }
         }
 
-        let mut lines: HashMap<u32, Arc<GcovLineResult>> = HashMap::new();
+        let mut lines: HashMap<u32, RefCell<GcovLineResult>> = HashMap::new();
         if let Some(ls) = &file.lines {
             for line in ls {
                 let usage = (line.count as u32 > 0) as u32;
                 lines.insert(
                     line.line_number,
-                    Arc::from(GcovLineResult {
+                    RefCell::from(GcovLineResult {
                         line_no: line.line_number,
-                        usage: AtomicU32::from(usage),
+                        usage,
                     }),
                 );
             }
         }
 
-        let branches: HashMap<u32, Arc<GcovBranchResult>> = HashMap::new();
+        let branches: HashMap<u32, RefCell<GcovBranchResult>> = HashMap::new();
         if TRACK_BRANCHES.clone() {
             // TODO: Add support for branch tracking
             unimplemented!("Branch tracking not yet supported")
         }
 
-        result.insert(Arc::from(file.file.clone()), (funcs, lines, branches));
+        result.insert(Box::from(file.file.clone()), (funcs, lines, branches));
     }
 
     Ok(result)

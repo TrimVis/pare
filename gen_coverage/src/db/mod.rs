@@ -9,8 +9,6 @@ use log::info;
 use rusqlite::{params, Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 const MEMORY_CONN_URI: &str = ":memory:";
 const INSERT_BATCH_SIZE: usize = 400;
@@ -115,7 +113,7 @@ impl DbWriter {
             }
         }
 
-        let mut srcid_file_map: HashMap<Arc<String>, u64>;
+        let mut srcid_file_map: HashMap<Box<String>, u64>;
         {
             let mut stmt = tx.prepare_cached("SELECT id, path FROM \"sources\"")?;
             let rows = stmt.query_map(params![], |row| {
@@ -126,7 +124,7 @@ impl DbWriter {
             srcid_file_map = HashMap::with_capacity(rows.size_hint().0);
             for row in rows {
                 let (file, id) = row?;
-                srcid_file_map.insert(Arc::from(file), id);
+                srcid_file_map.insert(Box::from(file), id);
             }
         }
 
@@ -136,7 +134,7 @@ impl DbWriter {
                 let sid = srcid_file_map.get(file).unwrap();
                 for chunk in &funcs
                     .values()
-                    .filter(|f| f.usage.load(Ordering::SeqCst) > 0)
+                    .filter(|f| f.borrow().usage > 0)
                     .chunks(INSERT_BATCH_SIZE)
                 {
                     let mut batch_query = String::new();
@@ -144,6 +142,7 @@ impl DbWriter {
                         // NOTE: As the function name also contains the parameter types,
                         // overloading kind of breaks the names and they should be used with care
                         // ON CONFLICT (source_id, name) DO UPDATE
+                        let func = func.borrow();
                         batch_query.push_str(&format!(
                             "INSERT INTO \"functions\" (
                             source_id,
@@ -162,7 +161,7 @@ impl DbWriter {
                             func.start.col.to_string(),
                             func.end.line.to_string(),
                             func.end.col.to_string(),
-                            func.usage.load(Ordering::SeqCst)
+                            func.usage
                         ));
                     }
                     tx.execute_batch(&batch_query)?;
@@ -176,11 +175,12 @@ impl DbWriter {
                 let sid = srcid_file_map.get(file).unwrap();
                 for chunk in &lines
                     .values()
-                    .filter(|l| l.usage.load(Ordering::SeqCst) > 0)
+                    .filter(|l| l.borrow().usage > 0)
                     .chunks(INSERT_BATCH_SIZE)
                 {
                     let mut batch_query = String::new();
                     for line in chunk {
+                        let line = line.borrow();
                         batch_query.push_str(&format!(
                             "INSERT INTO \"lines\" (
                             source_id,
@@ -191,7 +191,7 @@ impl DbWriter {
                         SET benchmark_usage_count = benchmark_usage_count + excluded.benchmark_usage_count;",
                             *sid,
                             line.line_no,
-                            line.usage.load(Ordering::SeqCst)
+                            line.usage
                         ));
                     }
                     tx.execute_batch(&batch_query)?;
