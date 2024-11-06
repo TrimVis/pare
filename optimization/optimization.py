@@ -3,53 +3,66 @@
 import os
 import sqlite3
 import gurobipy as gp
+import numpy as np
+import math
 from gurobipy import GRB
 
 
-DB_FILE = "./coverage_db.sqlite"
-LICENSE_FILE = "./gurobi.lic"
+DB_FILE = "./reports/report.sqlite"
+LICENSE_FILE = "./optimization/gurobi.lic"
 MODEL_NAME = "benchopt"
 
 
-# New Idea: 
-#    Estimate the normalization factor c, based on the distribution of C_i
-#    --> Assume a gaussian distribution (natural dataset)
-#    --> Assume that f_i with large C_i, are likely to have a large overlap
-# 
-# Both of these have to be shown for our dataset, additionally it would probably
-# be good to add some asserts to the code, that try to verify both of these assumptions
-# (2nd probably not easily verifiable, but logical)
-
 def main():
+    print("Extracting values from DB")
+    p = 0.95
+    (no_benchs, n, uids, len_c, C, B) = get_function_stats_from_db()
+
     with get_env_from_license(LICENSE_FILE) as env:
         env.start()
         with gp.Model(MODEL_NAME, env=env) as m:
-            p = 0.95
-            (no_benchs, n, uids, l, c) = get_function_stats_from_db()
 
-            # F_i, indicates if function i is used or not (in the debloated version)
-            f = m.addVars(range(n), vtype=GRB.BINARY, obj=1, name="F")
+            print("Preparing optimization")
+            O = m.addVars(range(n), vtype=GRB.BINARY, obj=1, name="O")
+            z = m.addVars(range(no_benchs), vtype=GRB.BINARY, name="z")
 
+            # print(len(C))
+            # print(n)
+            # print(len(C[0].tolist()[0]))
+            # print(no_benchs)
 
-            m.setObjective(f.prod(l), GRB.MINIMIZE)
-            # m.addConstr(f.prod(c) >=  f.sum() * (p * no_benchs), "c0")
+            # print()
+            # print(math.prod([O[i] for i in range(1)]))
+            # print()
 
-            for j in range(no_benchs):
-                functions_in_benchmark = get_functions_in_benchmark(j)
-                m.addConstr(B[j] <= quicksum(f[i] for i in functions_in_benchmark), f"benchmark_{j}")
-            m.addConstr(B.sum() >= p * no_benchs, "coverage_constraint")
+            # print(
+            #     math.prod([
+            #         O[j]
+            #         for j in range(n)
+            #         if C[0, j]
+            #     ])
+            # )
 
+            # m.setObjective(O.prod(len_c), GRB.MINIMIZE)
+            # m.addConstr(GRB.quicksum([
+            #     math.prod([
+            #         O[j]
+            #         for j in range(n)
+            #         if B[i, j]
+            #     ]) for i in range(no_benchs)]
+            # ) >= p * no_benchs, "c0")
 
-            # Minimize the total number of alive code
-            # m.setObjective(sum(l[i] * f[i] for i in range(n)), GRB.MINIMIZE)
-            # m.setObjective(sum(f[i] for i in range(n)), GRB.MINIMIZE)
+            for i in range(no_benchs):
+                J_i = [j for j in range(n) if B[i, j]]
+                m.addConstrs((z[i] <= O[j]
+                             for j in J_i), name=f"c_bench_{i}_upper")
+                m.addConstr(
+                    z[i] >= gp.quicksum(O[j] for j in J_i) - len(J_i) + 1,
+                    name=f"c_bench_{i}_lower"
+                )
+            m.addConstr(z.sum() >= p * no_benchs, "c0")
 
-            # m.addConstr(sum(c[i] * f[i] for i in range(n)) >=  p * sum(l), "c0")
-            # m.addConstr(sum(c[i] * f[i] for i in range(n)) / n >=  (p * no_benchs) // 1, "c0")
-            # m.addConstr(sum(c[i] * f[i] for i in range(n)) >=  p * no_benchs, "c0")
-
-            # m.addConstr(sum(c[i] * f[i] for i in range(n)) / n >=  1, "c0")
-
+            print("Running optimization")
             # Optimize model
             m.optimize()
 
@@ -60,51 +73,58 @@ def main():
                 # for v in m.getVars():
                 #     print(f"{v.VarName} {v.X:g}")
 
-                print(f"No functions in use: {sum([v.X for v in m.getVars()])}")
-                print(f"Total code length:")
-                print(f"\tbefore optimization: {sum([l[i] for i in range(n) if c[i]])}")
-                print(f"\tafter optimization: {sum([l[i] * f[i].X for i in range(n)])}")
+                print(f"No functions in use: {
+                    sum([v.X for v in m.getVars()])}")
+                # print("Total code length:")
+                # print(f"\tbefore optimization: {
+                #     sum([l[i] for i in range(n) if c[i]])}")
+                # print(f"\tafter optimization: {
+                #     sum([l[i] * O[i].X for i in range(n)])}")
 
-                print(f"Achieved constraint: {sum(c[i] * f[i].X for i in range(n)) } >= {sum(f[i].X for i in range(n)) * p * no_benchs}")
+                # print(f"Achieved constraint: {sum(
+                #     c[i] * O[i].X for i in range(n))} >= {sum(
+                #         O[i].X for i in range(n)) * p * no_benchs}")
 
                 print(f"Obj: {m.ObjVal:g}")
             else:
                 status = ("INFEASIBLE" if m.status == GRB.INFEASIBLE else
-                         "UNBOUNDED" if m.status == GRB.UNBOUNDED else
-                         "INF_OR_UNBD" if m.status == GRB.INF_OR_UNBD else
+                          "UNBOUNDED" if m.status == GRB.UNBOUNDED else
+                          "INF_OR_UNBD" if m.status == GRB.INF_OR_UNBD else
                           f"Uknown case ({m.status})")
-                print(f"Could not find optimal result. Exit status: {status}")
+                print(
+                    f"Could not find optimal result. Exit status: {status}")
+
 
 def get_function_stats_from_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
 
+    query = "SELECT COUNT(1) FROM benchmarks"
+    cur.execute(query)
+    rows = cur.fetchall()
+    no_benchs = min(rows[0][0], 2000)
+
     # Get all entries
-    query = f"SELECT uid, execution_count, file, func_name, start_line, end_line FROM FunctionUsage"
+    query = "SELECT id, benchmark_usage_count, name, start_line, end_line FROM functions"
     cur.execute(query)
     rows = cur.fetchall()
 
-
-    no_benchs = 0
     uids = []
-    l = []
-    c = []
-    counter = 0
-    for (uid, bcount, file, name, start, end) in rows:
-        counter += 1
-        # Filter out include files
-        if not file.startswith("src/") and not file.startswith("build/"): 
-            continue
-
-        no_benchs = max(bcount, no_benchs)
+    len_c = []
+    C = []
+    for (uid, bcount, name, start, end) in rows:
         uids.append(uid)
-        leng = max(int(end) - int(start), 1)
-        l.append(leng)
-        c.append(bcount)
+        len_c.append(int(end) - int(start) + 1)
+        # Overloaded functions are double counted in the current report db
+        li = min(bcount, no_benchs)
+        # Mock values for Ci
+        Ci = li * [1] + (no_benchs - li) * [0]
+        C.append(Ci)
 
-    return (no_benchs, len(uids), uids, l, c)
-        
+    C = np.matrix(C)
+    B = C.transpose()
 
+    return (no_benchs, len(uids), uids, len_c, C, B)
 
 
 def get_env_from_license(file_path):

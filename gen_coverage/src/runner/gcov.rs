@@ -142,7 +142,7 @@ pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes, kind: MergeKind) {
                 for (k, v) in &value.0 {
                     pvalue
                         .0
-                        .entry(k.clone())
+                        .entry(*k)
                         .and_modify(|e| {
                             let v_usage = v.borrow().usage;
                             let e = e.get_mut();
