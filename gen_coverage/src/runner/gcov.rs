@@ -21,7 +21,7 @@ use std::process::{exit, Command};
 pub type GcovRes = HashMap<
     Box<String>,
     (
-        HashMap<Box<String>, RefCell<GcovFuncResult>>,
+        HashMap<(u32, u32), RefCell<GcovFuncResult>>,
         HashMap<u32, RefCell<GcovLineResult>>,
         HashMap<u32, RefCell<GcovBranchResult>>,
     ),
@@ -203,13 +203,13 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
         }
 
         // Filter out libraries unless specified otherwise
-        let mut funcs: HashMap<Box<String>, RefCell<GcovFuncResult>> = HashMap::new();
+        let mut funcs: HashMap<(u32, u32), RefCell<GcovFuncResult>> = HashMap::new();
         if let Some(fs) = &file.functions {
             for function in fs {
                 let usage = (function.execution_count as u32 > 0) as u32;
                 let name = function.demangled_name.clone();
                 funcs.insert(
-                    Box::from(name.clone()),
+                    (function.start_line, function.start_column),
                     RefCell::from(GcovFuncResult {
                         name,
                         start: FilePosition {
