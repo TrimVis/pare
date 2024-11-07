@@ -14,11 +14,12 @@ __pycache__
 *.sqlite-wal
 *.sqlite-shm
 *.out
-*.cpp
 *.backup
+/benchopt
 output.log
 gurobi.lic
 rustup_installer.sh
 /just
 /sync_to_remote.sh
+/code_remover/example.cpp
 
