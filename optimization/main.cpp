@@ -1,9 +1,12 @@
 #include "gurobi_c++.h"
+#include <algorithm> // For std::replace
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip> // For std::setprecision
 #include <iostream>
 #include <sqlite3.h>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -12,8 +15,121 @@ const std::string LICENSE_FILE = "./optimization/gurobi.lic";
 const std::string MODEL_NAME = "benchopt";
 
 // FIXME: Due to local hardware constraints and for testing purposes
-// I limit the no of benches being analyzed to 1/100th of the actual size
-const float SCALER = 0.01;
+// I limit the no of benches being analyzed to a subset
+const float SCALER = 0.005;
+
+void store_used_functions_to_db(std::vector<bool> &func_state,
+                                std::vector<int> &func_ids, float p) {
+  sqlite3 *db;
+  int rc = sqlite3_open(DB_FILE.c_str(), &db);
+  if (rc) {
+    std::cerr << "Can't open database: " << sqlite3_errmsg(db) << std::endl;
+    exit(1);
+  }
+
+  // Create the table name using 'p', replacing any '.' with '_'
+  std::ostringstream table_name_stream;
+  table_name_stream << "optimization_result_p" << std::fixed
+                    << std::setprecision(4) << p;
+  std::string table_name = table_name_stream.str();
+  std::replace(table_name.begin(), table_name.end(), '.',
+               '_'); // Replace '.' with '_'
+
+  // Create the table
+  std::ostringstream create_table_stream;
+  create_table_stream << "CREATE TABLE " << table_name
+                      << " (func_id INTEGER, use_function INTEGER);";
+  std::string create_table_query = create_table_stream.str();
+
+  rc = sqlite3_exec(db, create_table_query.c_str(), nullptr, nullptr, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to create table: " << sqlite3_errmsg(db) << std::endl;
+    sqlite3_close(db);
+    exit(1);
+  }
+
+  // Prepare the INSERT statement
+  std::ostringstream insert_stream;
+  insert_stream << "INSERT INTO " << table_name
+                << " (func_id, use_function) VALUES (?, ?);";
+  std::string insert_query = insert_stream.str();
+
+  sqlite3_stmt *insert_stmt;
+  rc = sqlite3_prepare_v2(db, insert_query.c_str(), -1, &insert_stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to prepare insert statement: " << sqlite3_errmsg(db)
+              << std::endl;
+    sqlite3_close(db);
+    exit(1);
+  }
+
+  // Begin transaction for efficiency
+  rc = sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to begin transaction: " << sqlite3_errmsg(db)
+              << std::endl;
+    sqlite3_finalize(insert_stmt);
+    sqlite3_close(db);
+    exit(1);
+  }
+
+  // Loop over the data and insert into the table
+  for (size_t i = 0; i < func_ids.size(); ++i) {
+    // Bind func_id
+    rc = sqlite3_bind_int(insert_stmt, 1, func_ids[i]);
+    if (rc != SQLITE_OK) {
+      std::cerr << "Failed to bind func_id: " << sqlite3_errmsg(db)
+                << std::endl;
+      sqlite3_finalize(insert_stmt);
+      sqlite3_close(db);
+      exit(1);
+    }
+
+    // Bind use_function (convert bool to integer 0 or 1)
+    rc = sqlite3_bind_int(insert_stmt, 2, func_state[i] ? 1 : 0);
+    if (rc != SQLITE_OK) {
+      std::cerr << "Failed to bind use_function: " << sqlite3_errmsg(db)
+                << std::endl;
+      sqlite3_finalize(insert_stmt);
+      sqlite3_close(db);
+      exit(1);
+    }
+
+    // Execute the INSERT statement
+    rc = sqlite3_step(insert_stmt);
+    if (rc != SQLITE_DONE) {
+      std::cerr << "Failed to execute insert statement: " << sqlite3_errmsg(db)
+                << std::endl;
+      sqlite3_finalize(insert_stmt);
+      sqlite3_close(db);
+      exit(1);
+    }
+
+    // Reset the statement for the next iteration
+    rc = sqlite3_reset(insert_stmt);
+    if (rc != SQLITE_OK) {
+      std::cerr << "Failed to reset insert statement: " << sqlite3_errmsg(db)
+                << std::endl;
+      sqlite3_finalize(insert_stmt);
+      sqlite3_close(db);
+      exit(1);
+    }
+  }
+
+  // Commit the transaction
+  rc = sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to commit transaction: " << sqlite3_errmsg(db)
+              << std::endl;
+    sqlite3_finalize(insert_stmt);
+    sqlite3_close(db);
+    exit(1);
+  }
+
+  // Clean up
+  sqlite3_finalize(insert_stmt);
+  sqlite3_close(db);
+}
 
 void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
                                 std::vector<int> &len_c,
@@ -111,7 +227,7 @@ GRBEnv *get_env_from_license(const std::string &file_path) {
 
 int main() {
   try {
-    std::cout << "Extracting values from DB" << std::endl;
+    std::cout << " |>> Extracting values from DB" << std::endl;
     double p = 0.95;
     int no_benchs, n;
     std::vector<int> uids;
@@ -125,12 +241,13 @@ int main() {
     GRBModel model = GRBModel(*env);
     model.set(GRB_StringAttr_ModelName, MODEL_NAME);
 
-    std::cout << "Preparing optimization" << std::endl;
+    std::cout << " |>> Preparing optimization" << std::endl;
 
     // Add variables O
     std::vector<GRBVar> O(n);
     for (int i = 0; i < n; ++i) {
-      O[i] = model.addVar(0.0, 1.0, 1.0, GRB_BINARY, "O_" + std::to_string(i));
+      O[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
+                          "O_" + std::to_string(i));
     }
 
     // Add variables z
@@ -168,7 +285,7 @@ int main() {
     }
     model.addConstr(sum_z >= p * no_benchs, "c0");
 
-    std::cout << "Running optimization" << std::endl;
+    std::cout << " |>> Running optimization" << std::endl;
 
     // Optimize model
     model.optimize();
@@ -211,6 +328,12 @@ int main() {
       std::cout << "No functions in use: " << sum_functions << std::endl;
       std::cout << "Objective: " << objVal << std::endl;
 
+      std::cout << " |>> Storing result in DB" << std::endl;
+      std::vector<bool> func_state(n);
+      for (int i = 0; i < n; ++i) {
+        func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
+      }
+      store_used_functions_to_db(func_state, uids, p);
     } else {
       int status = model.get(GRB_IntAttr_Status);
       std::string statusStr;
