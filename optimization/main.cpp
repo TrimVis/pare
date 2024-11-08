@@ -228,7 +228,7 @@ GRBEnv *get_env_from_license(const std::string &file_path) {
 int main() {
   try {
     std::cout << " |>> Extracting values from DB" << std::endl;
-    double p = 0.95;
+    double p = 0.99;
     int no_benchs, n;
     std::vector<int> uids;
     std::vector<int> len_c;

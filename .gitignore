@@ -4,6 +4,7 @@
 /venv/
 /.venv/
 /.cargo/
+/.gurobi/
 /old/
 target/
 __pycache__
