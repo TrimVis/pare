@@ -16,6 +16,7 @@ const std::string MODEL_NAME = "benchopt";
 
 // FIXME: Due to local hardware constraints and for testing purposes
 // I limit the no of benches being analyzed to a subset
+// const float SCALER = 1;
 const float SCALER = 0.005;
 
 void store_used_functions_to_db(std::vector<bool> &func_state,
@@ -143,7 +144,7 @@ void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
   }
 
   sqlite3_stmt *stmt;
-  const char *query = "SELECT COUNT(1) FROM benchmarks";
+  const char *query = "SELECT MAX(benchmark_usage_count) FROM functions";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
