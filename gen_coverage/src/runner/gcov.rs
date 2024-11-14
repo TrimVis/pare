@@ -3,11 +3,13 @@ use crate::types::{
     Benchmark, FilePosition, GcovBranchResult, GcovFuncResult, GcovLineResult, ResultT,
 };
 
+use bitvec::prelude::*;
 use glob::glob;
-use log::error;
+use log::{error, info};
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use serde_json;
+
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,6 +28,68 @@ pub type GcovRes = HashMap<
         HashMap<u32, RefCell<GcovBranchResult>>,
     ),
 >;
+
+pub type GcovBitvec = HashMap<
+    Box<String>,
+    (
+        HashMap<(u32, u32), BitVec<u8, Msb0>>,
+        HashMap<u32, BitVec<u8, Msb0>>,
+        HashMap<u32, BitVec<u8, Msb0>>,
+    ),
+>;
+
+pub(super) fn res_to_bitvec(
+    gcov_bitvec: &mut GcovBitvec,
+    no_benchmarks: usize,
+    benchmark_id: usize,
+    result: &GcovRes,
+) {
+    for (key, value) in result {
+        gcov_bitvec
+            .borrow_mut()
+            .entry(key.clone())
+            .and_modify(|pvalue| {
+                for (k, v) in &value.0 {
+                    if v.borrow().usage > 0 {
+                        pvalue
+                            .0
+                            .entry(*k)
+                            .and_modify(|e| {
+                                e.set(benchmark_id - 1, true);
+                            })
+                            .or_insert(bitvec![u8, Msb0; 0; no_benchmarks]);
+                    }
+                }
+
+                for (k, v) in &value.1 {
+                    if v.borrow().usage > 0 {
+                        pvalue
+                            .1
+                            .entry(*k)
+                            .and_modify(|e| {
+                                e.set(benchmark_id - 1, true);
+                            })
+                            .or_insert(bitvec![u8, Msb0; 0; no_benchmarks]);
+                    }
+                }
+
+                if TRACK_BRANCHES.clone() {
+                    unreachable!();
+                    // for (k, v) in value.2 {
+                    //     pvalue
+                    //         .2
+                    //         .entry(k)
+                    //         .and_modify(|_e| {
+                    //             if ARGS.mode == CoverageMode::Full {
+                    //             }
+                    //         })
+                    //         .or_insert(v);
+                    // }
+                }
+            })
+            .or_insert((HashMap::new(), HashMap::new(), HashMap::new()));
+    }
+}
 
 const CHUNK_SIZE: usize = 20;
 

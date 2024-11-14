@@ -78,6 +78,15 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
         //  )";
         conn.execute(&func_table, [])
             .expect("Issue during functions table creation");
+
+        let funcvec_table = "CREATE TABLE \"function_bitvecs\" ( 
+                source_id INTEGER NOT NULL, 
+                function_id INTEGER NOT NULL, 
+                data BLOB NOT NULL,
+                UNIQUE(source_id, function_id)
+            )";
+        conn.execute(&funcvec_table, [])
+            .expect("Issue during functions bitvecs table creation");
     }
 
     if TRACK_LINES.clone() {

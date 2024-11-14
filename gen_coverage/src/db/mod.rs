@@ -1,6 +1,6 @@
 mod init;
 use crate::args::{TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
-use crate::runner::GcovRes;
+use crate::runner::{GcovBitvec, GcovRes};
 use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::{ResultT, ARGS};
 
@@ -94,6 +94,88 @@ impl DbWriter {
                 run_result.stderr,
             ])
             .expect("Issue during cvc5 run result insertion!");
+        Ok(())
+    }
+
+    pub fn add_gcov_bitvecs(&mut self, run_result: GcovBitvec) -> ResultT<()> {
+        let tx = self.conn.transaction()?;
+        // 1. Ensure all sources exist in DB & retrieve their ids
+        {
+            for chunk in &run_result.iter().chunks(INSERT_BATCH_SIZE) {
+                let mut batch_query = String::new();
+                for (file, _) in chunk {
+                    batch_query.push_str(&format!(
+                        "INSERT INTO \"sources\" ( path ) VALUES ( '{}' ) ON CONFLICT DO NOTHING;",
+                        file
+                    ));
+                }
+                tx.execute_batch(&batch_query)?;
+            }
+        }
+
+        let mut srcid_file_map: HashMap<Box<String>, u64>;
+        {
+            let mut stmt = tx.prepare_cached("SELECT id, path FROM \"sources\"")?;
+            let rows = stmt.query_map(params![], |row| {
+                let id: u64 = row.get(0)?;
+                let file: String = row.get(1)?;
+                Ok((file, id))
+            })?;
+            srcid_file_map = HashMap::with_capacity(rows.size_hint().0);
+            for row in rows {
+                let (file, id) = row?;
+                srcid_file_map.insert(Box::from(file), id);
+            }
+        }
+
+        // 2. Track usage data of all (used) functions
+        if TRACK_FUNCS.clone() {
+            let mut fids: HashMap<(u64, (u32, u32)), u64>;
+            {
+                let mut stmt = tx.prepare_cached(
+                    "SELECT id, source_id, start_line, start_col FROM \"functions\"",
+                )?;
+                let rows = stmt.query_map(params![], |row| {
+                    let id: u64 = row.get(0)?;
+                    let sid: u64 = row.get(1)?;
+                    let start_line: u32 = row.get(2)?;
+                    let start_col: u32 = row.get(3)?;
+                    Ok((sid, (start_line, start_col), id))
+                })?;
+                fids = HashMap::with_capacity(rows.size_hint().0);
+                for row in rows {
+                    let (sid, pos, id) = row?;
+                    fids.insert((sid, pos), id);
+                }
+            }
+
+            for (file, (funcs, _, _)) in &run_result {
+                let sid = srcid_file_map.get(file).unwrap();
+                for (fkey, fvec) in funcs {
+                    let fid_key = (*sid, *fkey);
+                    let fid = fids.get(&fid_key).unwrap();
+                    let bytes: &[u8] = fvec.as_raw_slice();
+
+                    tx.execute(
+                        "INSERT INTO \"function_bitvecs\" ( source_id, function_id, data ) VALUES (?1, ?2, ?3);",
+                        params![ sid, fid, bytes ]
+                    )?;
+                }
+            }
+        }
+
+        // 2. Track usage data of all (used) lines
+        if TRACK_LINES.clone() {
+            // TODO: Add support for branch tracking
+            unimplemented!("Bitvecs for lines not yet supported")
+        }
+
+        if TRACK_BRANCHES.clone() {
+            // TODO: Add support for branch tracking
+            unimplemented!("Branch tracking not yet supported")
+        }
+        tx.commit()?;
+
         Ok(())
     }
 

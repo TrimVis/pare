@@ -1,6 +1,7 @@
 mod cvc5;
 mod gcov;
 mod worker;
+pub use gcov::GcovBitvec;
 pub use gcov::GcovRes;
 use log::{error, warn};
 

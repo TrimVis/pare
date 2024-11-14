@@ -13,7 +13,6 @@ use indicatif_log_bridge::LogWrapper;
 pub use log::{error, info, warn};
 use multiwriter::MultiWriter;
 use std::fs::{remove_dir_all, File};
-use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -21,9 +20,6 @@ use types::Benchmark;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting benchmark suite");
-    panic::set_hook(Box::new(|panic_info| {
-        error!("Panic occurred: {:?}", panic_info);
-    }));
 
     let start = Instant::now();
     let running = Arc::new(AtomicBool::new(true));

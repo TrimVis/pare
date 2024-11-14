@@ -14,10 +14,8 @@ const std::string DB_FILE = "./reports/report.sqlite";
 const std::string LICENSE_FILE = "./optimization/gurobi.lic";
 const std::string MODEL_NAME = "benchopt";
 
-// FIXME: Due to local hardware constraints and for testing purposes
-// I limit the no of benches being analyzed to a subset
-// const float SCALER = 1;
-const float SCALER = 0.005;
+// NOTE: Scales the model down
+const float SCALER = 1;
 
 void store_used_functions_to_db(std::vector<bool> &func_state,
                                 std::vector<int> &func_ids, float p) {
@@ -286,9 +284,12 @@ int main() {
     }
     model.addConstr(sum_z >= p * no_benchs, "c0");
 
-    std::cout << " |>> Running optimization" << std::endl;
+    // Write out the model for further analysis
+    std::cout << " |>> Storing model" << std::endl;
+    model.write("model.lp");
 
     // Optimize model
+    std::cout << " |>> Running optimization" << std::endl;
     model.optimize();
 
     if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
@@ -357,6 +358,8 @@ int main() {
     std::cout << e.getMessage() << std::endl;
   } catch (std::exception &e) {
     std::cout << "Exception during optimization: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown exception caught." << std::endl;
   }
   return 0;
 }

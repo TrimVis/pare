@@ -5,6 +5,8 @@ use super::ProcessingStatusMessage;
 use super::RunnerQueueMessage;
 use crate::db::DbWriter;
 use crate::runner::gcov::merge_gcov;
+use crate::runner::gcov::res_to_bitvec;
+use crate::runner::gcov::GcovBitvec;
 use crate::runner::gcov::MergeKind;
 use crate::runner::GcovRes;
 use crate::ARGS;
@@ -15,6 +17,7 @@ use log::LevelFilter;
 use log::{error, info, warn};
 use std::borrow::BorrowMut;
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::fs::remove_dir_all;
 use std::mem;
@@ -183,6 +186,9 @@ impl Worker {
                 count as u64
             };
 
+            // Bitvector storing the indicator matrix
+            let mut gcov_bitvec: GcovBitvec = HashMap::new();
+
             // Batch process 100 results at once to decrease load on DB
             let max_bench_aggregate: u64 = min(100, bench_count);
             let mut result_buf: Option<GcovRes> = None;
@@ -214,6 +220,13 @@ impl Worker {
                             "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",
                             bench_id
                         );
+
+                            res_to_bitvec(
+                                &mut gcov_bitvec,
+                                bench_count.try_into().unwrap(),
+                                bench_id.try_into().unwrap(),
+                                &gcov_result,
+                            );
                             match result_buf.borrow_mut() {
                                 None => {
                                     result_buf = Some(gcov_result);
@@ -275,6 +288,8 @@ impl Worker {
                 db.add_gcov_measurement(r)
                     .expect("Could not add gcov measurement");
             };
+            db.add_gcov_bitvecs(gcov_bitvec)
+                .expect("Could not insert gcov bitvecs");
             status_sender
                 .send(ProcessingStatusMessage::BenchesDone(bench_counter))
                 .expect("Could not update bench status");
