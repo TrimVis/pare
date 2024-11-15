@@ -5,7 +5,7 @@ use crate::types::{
 
 use bitvec::prelude::*;
 use glob::glob;
-use log::{error, info};
+use log::error;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde::Deserialize;
 use serde_json;

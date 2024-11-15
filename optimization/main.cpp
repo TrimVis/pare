@@ -1,6 +1,7 @@
 #include "gurobi_c++.h"
 #include <algorithm> // For std::replace
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip> // For std::setprecision
@@ -86,6 +87,7 @@ void store_used_functions_to_db(std::vector<bool> &func_state,
 
     // Bind use_function (convert bool to integer 0 or 1)
     rc = sqlite3_bind_int(insert_stmt, 2, func_state[i] ? 1 : 0);
+    std::cout << "POS A" << std::endl;
     if (rc != SQLITE_OK) {
       std::cerr << "Failed to bind use_function: " << sqlite3_errmsg(db)
                 << std::endl;
@@ -132,7 +134,6 @@ void store_used_functions_to_db(std::vector<bool> &func_state,
 
 void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
                                 std::vector<int> &len_c,
-                                std::vector<std::vector<bool>> &C,
                                 std::vector<std::vector<bool>> &B) {
   sqlite3 *db;
   int rc = sqlite3_open(DB_FILE.c_str(), &db);
@@ -175,27 +176,40 @@ void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
 
     uids.push_back(uid);
     len_c.push_back(end - start + 1);
-
-    int li = std::round(bcount * SCALER);
-    std::vector<bool> Ci(no_benchs, 0);
-    // FIXME: atm this is mock data, we will need to replace this with actual
-    // data
-    for (int i = 0; i < li; ++i) {
-      Ci[i] = true;
-    }
-    C.push_back(Ci);
   }
   sqlite3_finalize(stmt);
-  sqlite3_close(db);
 
-  // Transpose C to get B
   n = uids.size();
-  B.resize(no_benchs, std::vector<bool>(n, 0));
-  for (int i = 0; i < n; ++i) {
-    for (int j = 0; j < no_benchs; ++j) {
-      B[j][i] = C[i][j];
-    }
+
+  query = "SELECT function_id, data FROM function_bitvecs";
+  if (sqlite3_prepare_v2(db, query, -1, &stmt, nullptr) != SQLITE_OK) {
+    std::cerr << "Error preparing SQL statement\n";
+    sqlite3_close(db);
+    exit(1);
   }
+
+  // Process each row
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    // Read source_id and function_id as integers
+    int function_id = sqlite3_column_int(stmt, 0);
+
+    // Read the BLOB data
+    const void *blob_data = sqlite3_column_blob(stmt, 1);
+    int blob_size = sqlite3_column_bytes(stmt, 1);
+
+    std::vector<bool> Bi(no_benchs, 0);
+    const uint8_t *data = static_cast<const uint8_t *>(blob_data);
+
+    for (int i = 0; i < blob_size; ++i) {
+      for (int bit = 0; bit < 8; ++bit) {
+        Bi[i] = (data[i] >> bit) & 1;
+      }
+    }
+    B.push_back(Bi);
+  }
+  sqlite3_finalize(stmt);
+
+  sqlite3_close(db);
 }
 
 GRBEnv *get_env_from_license(const std::string &file_path) {
@@ -231,10 +245,9 @@ int main() {
     int no_benchs, n;
     std::vector<int> uids;
     std::vector<int> len_c;
-    std::vector<std::vector<bool>> C;
     std::vector<std::vector<bool>> B;
 
-    get_function_stats_from_db(no_benchs, n, uids, len_c, C, B);
+    get_function_stats_from_db(no_benchs, n, uids, len_c, B);
 
     GRBEnv *env = get_env_from_license(LICENSE_FILE);
     GRBModel model = GRBModel(*env);
