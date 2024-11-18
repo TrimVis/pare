@@ -87,7 +87,6 @@ void store_used_functions_to_db(std::vector<bool> &func_state,
 
     // Bind use_function (convert bool to integer 0 or 1)
     rc = sqlite3_bind_int(insert_stmt, 2, func_state[i] ? 1 : 0);
-    std::cout << "POS A" << std::endl;
     if (rc != SQLITE_OK) {
       std::cerr << "Failed to bind use_function: " << sqlite3_errmsg(db)
                 << std::endl;
@@ -160,7 +159,7 @@ void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
   }
   sqlite3_finalize(stmt);
 
-  query = "SELECT id, benchmark_usage_count, name, start_line, end_line FROM "
+  query = "SELECT id, benchmark_usage_count, start_line, end_line FROM "
           "functions";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
@@ -171,8 +170,8 @@ void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     int uid = sqlite3_column_int(stmt, 0);
     int bcount = sqlite3_column_int(stmt, 1);
-    int start = sqlite3_column_int(stmt, 3);
-    int end = sqlite3_column_int(stmt, 4);
+    int start = sqlite3_column_int(stmt, 2);
+    int end = sqlite3_column_int(stmt, 3);
 
     uids.push_back(uid);
     len_c.push_back(end - start + 1);
@@ -188,6 +187,7 @@ void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
     exit(1);
   }
 
+  B.reserve(n);
   // Process each row
   while (sqlite3_step(stmt) == SQLITE_ROW) {
     // Read source_id and function_id as integers
@@ -198,6 +198,7 @@ void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
     int blob_size = sqlite3_column_bytes(stmt, 1);
 
     std::vector<bool> Bi(no_benchs, 0);
+    Bi.reserve(blob_size * 8);
     const uint8_t *data = static_cast<const uint8_t *>(blob_data);
 
     for (int i = 0; i < blob_size; ++i) {
