@@ -273,7 +273,7 @@ int main() {
     for (int i = 0; i < no_benchs; ++i) {
       std::vector<int> J_i;
       for (int j = 0; j < n; ++j) {
-        if (B[i][j]) {
+        if (B[j][i]) {
           J_i.push_back(j);
         }
       }
@@ -306,6 +306,7 @@ int main() {
     std::cout << " |>> Running optimization" << std::endl;
     model.optimize();
 
+    std::cout << " |>> Optimization finished!" << std::endl;
     if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
       double objVal = model.get(GRB_DoubleAttr_ObjVal);
       // Total code length before optimization
