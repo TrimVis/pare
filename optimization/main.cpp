@@ -13,7 +13,7 @@
 
 const std::string DB_FILE = "./reports/report.sqlite";
 const std::string LICENSE_FILE = "./optimization/gurobi.lic";
-const std::string MODEL_NAME = "benchopt";
+const std::string BASE_MODEL_NAME = "benchopt";
 
 // NOTE: Scales the model down
 const float SCALER = 1;
@@ -34,6 +34,18 @@ void store_used_functions_to_db(std::vector<bool> &func_state,
   std::string table_name = table_name_stream.str();
   std::replace(table_name.begin(), table_name.end(), '.',
                '_'); // Replace '.' with '_'
+
+  // Drop any existing tables
+  std::ostringstream drop_table_stream;
+  drop_table_stream << "DROP TABLE IF EXISTS " << table_name << ";";
+  std::string drop_table_query = drop_table_stream.str();
+
+  rc = sqlite3_exec(db, drop_table_query.c_str(), nullptr, nullptr, nullptr);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to create table: " << sqlite3_errmsg(db) << std::endl;
+    sqlite3_close(db);
+    exit(1);
+  }
 
   // Create the table
   std::ostringstream create_table_stream;
@@ -239,7 +251,7 @@ GRBEnv *get_env_from_license(const std::string &file_path) {
   return env;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
   try {
     std::cout << " |>> Extracting values from DB" << std::endl;
     double p = 0.99;
@@ -252,7 +264,8 @@ int main() {
 
     GRBEnv *env = get_env_from_license(LICENSE_FILE);
     GRBModel model = GRBModel(*env);
-    model.set(GRB_StringAttr_ModelName, MODEL_NAME);
+    std::string model_name = BASE_MODEL_NAME + "_p" + std::to_string(p);
+    model.set(GRB_StringAttr_ModelName, model_name);
 
     std::cout << " |>> Preparing optimization" << std::endl;
 
@@ -298,13 +311,13 @@ int main() {
     }
     model.addConstr(sum_z >= p * no_benchs, "c0");
 
-    // Write out the model for further analysis
-    std::cout << " |>> Storing model" << std::endl;
-    model.write("model.lp");
-
     // Optimize model
     std::cout << " |>> Running optimization" << std::endl;
     model.optimize();
+
+    // Write out the model for potential further analysis
+    std::cout << " |>> Storing model" << std::endl;
+    model.write("model_" + model_name + ".lp");
 
     std::cout << " |>> Optimization finished!" << std::endl;
     if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
