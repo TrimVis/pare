@@ -36,8 +36,8 @@ bench-measure CORES=num_cpus(): build-rust
     @echo "Created report at '{{reportsdir}}/report.sqlite'"
 
 # Find a solution to our optimization problem
-bench-optimize: build-optimize
-    ./benchopt
+bench-optimize +P_VALUES: build-optimize
+    ./benchopt {{P_VALUES}}
 
 download_bench:
     mkdir -p "{{benchdir}}"

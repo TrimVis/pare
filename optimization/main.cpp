@@ -1,5 +1,6 @@
 #include "gurobi_c++.h"
 #include <algorithm> // For std::replace
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -252,135 +253,144 @@ GRBEnv *get_env_from_license(const std::string &file_path) {
 }
 
 int main(int argc, char *argv[]) {
+  std::cout << " |>> Extracting values from DB" << std::endl;
+  int no_benchs, n;
+  std::vector<int> uids;
+  std::vector<int> len_c;
+  std::vector<std::vector<bool>> B;
+
+  get_function_stats_from_db(no_benchs, n, uids, len_c, B);
   try {
-    std::cout << " |>> Extracting values from DB" << std::endl;
-    double p = 0.99;
-    int no_benchs, n;
-    std::vector<int> uids;
-    std::vector<int> len_c;
-    std::vector<std::vector<bool>> B;
+    for (int i = 1; i < argc; i++) {
+      double p = std::stod(argv[i]);
+      assert(p < 1.0 && "Expected a p value of less than 1.0");
+      std::cout << std::endl
+                << std::endl
+                << " |>> Starting optimization run for p=" << p << std::endl;
 
-    get_function_stats_from_db(no_benchs, n, uids, len_c, B);
+      GRBEnv *env = get_env_from_license(LICENSE_FILE);
+      GRBModel model = GRBModel(*env);
+      std::string model_name = BASE_MODEL_NAME + "_p" + std::to_string(p);
+      model.set(GRB_StringAttr_ModelName, model_name);
 
-    GRBEnv *env = get_env_from_license(LICENSE_FILE);
-    GRBModel model = GRBModel(*env);
-    std::string model_name = BASE_MODEL_NAME + "_p" + std::to_string(p);
-    model.set(GRB_StringAttr_ModelName, model_name);
+      std::cout << " |>> Preparing optimization" << std::endl;
 
-    std::cout << " |>> Preparing optimization" << std::endl;
-
-    // Add variables O
-    std::vector<GRBVar> O(n);
-    for (int i = 0; i < n; ++i) {
-      O[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
-                          "O_" + std::to_string(i));
-    }
-
-    // Add variables z
-    std::vector<GRBVar> z(no_benchs);
-    for (int i = 0; i < no_benchs; ++i) {
-      z[i] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "z_" + std::to_string(i));
-    }
-
-    // Add constraints
-    for (int i = 0; i < no_benchs; ++i) {
-      std::vector<int> J_i;
-      for (int j = 0; j < n; ++j) {
-        if (B[j][i]) {
-          J_i.push_back(j);
-        }
-      }
-      // For each j in J_i, add z[i] <= O[j]
-      for (int j : J_i) {
-        model.addConstr(z[i] <= O[j], "c_bench_" + std::to_string(i) +
-                                          "_upper_" + std::to_string(j));
-      }
-      // Add constraint z[i] >= sum_j O[j] - len(J_i) + 1
-      GRBLinExpr sum_Oj = 0;
-      for (int j : J_i) {
-        sum_Oj += O[j];
-      }
-      model.addConstr(z[i] >= sum_Oj - J_i.size() + 1,
-                      "c_bench_" + std::to_string(i) + "_lower");
-    }
-
-    // Add constraint z.sum() >= p * no_benchs
-    GRBLinExpr sum_z = 0;
-    for (int i = 0; i < no_benchs; ++i) {
-      sum_z += z[i];
-    }
-    model.addConstr(sum_z >= p * no_benchs, "c0");
-
-    // Optimize model
-    std::cout << " |>> Running optimization" << std::endl;
-    model.optimize();
-
-    // Write out the model for potential further analysis
-    std::cout << " |>> Storing model" << std::endl;
-    model.write("model_" + model_name + ".lp");
-
-    std::cout << " |>> Optimization finished!" << std::endl;
-    if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
-      double objVal = model.get(GRB_DoubleAttr_ObjVal);
-      // Total code length before optimization
-      std::cout << "Total code length:" << std::endl;
-      double total_length_before = 0.0;
+      // Add variables O
+      std::vector<GRBVar> O(n);
       for (int i = 0; i < n; ++i) {
-        // Assuming c[i] = 1 for all functions before optimization
-        total_length_before += len_c[i];
+        O[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
+                            "O_" + std::to_string(i));
       }
-      std::cout << "\tbefore optimization: " << total_length_before
-                << std::endl;
 
-      // Total code length after optimization
-      double total_length_after = 0.0;
-      for (int i = 0; i < n; ++i) {
-        double O_value = O[i].get(GRB_DoubleAttr_X);
-        total_length_after += len_c[i] * O_value;
-      }
-      std::cout << "\tafter optimization: " << total_length_after << std::endl;
-
-      // Achieved constraint calculation
-      double lhs = 0.0;
-      double sum_functions = 0.0;
-      for (int i = 0; i < n; ++i) {
-        double O_value = O[i].get(GRB_DoubleAttr_X);
-        sum_functions += O_value;
-      }
+      // Add variables z
+      std::vector<GRBVar> z(no_benchs);
       for (int i = 0; i < no_benchs; ++i) {
-        double z_value = z[i].get(GRB_DoubleAttr_X);
-        lhs += z_value;
+        z[i] =
+            model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "z_" + std::to_string(i));
       }
-      double rhs = p * no_benchs;
-      std::cout << "Achieved constraint (Required Successful Benchmarks): "
-                << lhs << " >= " << rhs << std::endl;
 
-      std::cout << "No functions in use: " << sum_functions << std::endl;
-      std::cout << "Objective: " << objVal << std::endl;
-
-      std::cout << " |>> Storing result in DB" << std::endl;
-      std::vector<bool> func_state(n);
-      for (int i = 0; i < n; ++i) {
-        func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
+      // Add constraints
+      for (int i = 0; i < no_benchs; ++i) {
+        std::vector<int> J_i;
+        for (int j = 0; j < n; ++j) {
+          if (B[j][i]) {
+            J_i.push_back(j);
+          }
+        }
+        // For each j in J_i, add z[i] <= O[j]
+        for (int j : J_i) {
+          model.addConstr(z[i] <= O[j], "c_bench_" + std::to_string(i) +
+                                            "_upper_" + std::to_string(j));
+        }
+        // Add constraint z[i] >= sum_j O[j] - len(J_i) + 1
+        GRBLinExpr sum_Oj = 0;
+        for (int j : J_i) {
+          sum_Oj += O[j];
+        }
+        model.addConstr(z[i] >= sum_Oj - J_i.size() + 1,
+                        "c_bench_" + std::to_string(i) + "_lower");
       }
-      store_used_functions_to_db(func_state, uids, p);
-    } else {
-      int status = model.get(GRB_IntAttr_Status);
-      std::string statusStr;
-      if (status == GRB_INFEASIBLE) {
-        statusStr = "INFEASIBLE";
-      } else if (status == GRB_UNBOUNDED) {
-        statusStr = "UNBOUNDED";
-      } else if (status == GRB_INF_OR_UNBD) {
-        statusStr = "INF_OR_UNBD";
+
+      // Add constraint z.sum() >= p * no_benchs
+      GRBLinExpr sum_z = 0;
+      for (int i = 0; i < no_benchs; ++i) {
+        sum_z += z[i];
+      }
+      model.addConstr(sum_z >= p * no_benchs, "c0");
+
+      // Optimize model
+      std::cout << " |>> Running optimization" << std::endl;
+      model.optimize();
+
+      // Write out the model for potential further analysis
+      std::cout << " |>> Storing model" << std::endl;
+      model.write("model_" + model_name + ".lp");
+
+      std::cout << " |>> Optimization finished!" << std::endl;
+      if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
+        double objVal = model.get(GRB_DoubleAttr_ObjVal);
+        // Total code length before optimization
+        std::cout << "Total code length:" << std::endl;
+        double total_length_before = 0.0;
+        for (int i = 0; i < n; ++i) {
+          // Assuming c[i] = 1 for all functions before optimization
+          total_length_before += len_c[i];
+        }
+        std::cout << "\tbefore optimization: " << total_length_before
+                  << std::endl;
+
+        // Total code length after optimization
+        double total_length_after = 0.0;
+        for (int i = 0; i < n; ++i) {
+          double O_value = O[i].get(GRB_DoubleAttr_X);
+          total_length_after += len_c[i] * O_value;
+        }
+        std::cout << "\tafter optimization: " << total_length_after
+                  << std::endl;
+
+        // Achieved constraint calculation
+        double lhs = 0.0;
+        double sum_functions = 0.0;
+        for (int i = 0; i < n; ++i) {
+          double O_value = O[i].get(GRB_DoubleAttr_X);
+          sum_functions += O_value;
+        }
+        for (int i = 0; i < no_benchs; ++i) {
+          double z_value = z[i].get(GRB_DoubleAttr_X);
+          lhs += z_value;
+        }
+        double rhs = p * no_benchs;
+        std::cout << "Achieved constraint (Required Successful Benchmarks): "
+                  << lhs << " >= " << rhs << std::endl;
+
+        std::cout << "No functions in use: " << sum_functions << std::endl;
+        std::cout << "Objective: " << objVal << std::endl;
+
+        std::cout << " |>> Storing result in DB" << std::endl;
+        std::vector<bool> func_state(n);
+        for (int i = 0; i < n; ++i) {
+          func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
+        }
+        store_used_functions_to_db(func_state, uids, p);
       } else {
-        statusStr = "Unknown case (" + std::to_string(status) + ")";
+        int status = model.get(GRB_IntAttr_Status);
+        std::string statusStr;
+        if (status == GRB_INFEASIBLE) {
+          statusStr = "INFEASIBLE";
+        } else if (status == GRB_UNBOUNDED) {
+          statusStr = "UNBOUNDED";
+        } else if (status == GRB_INF_OR_UNBD) {
+          statusStr = "INF_OR_UNBD";
+        } else {
+          statusStr = "Unknown case (" + std::to_string(status) + ")";
+        }
+        std::cout << "Could not find optimal result. Exit status: " << statusStr
+                  << std::endl;
       }
-      std::cout << "Could not find optimal result. Exit status: " << statusStr
-                << std::endl;
-    }
 
-    delete env;
+      model.reset();
+      delete env;
+    }
   } catch (GRBException &e) {
     std::cout << "Error code = " << e.getErrorCode() << std::endl;
     std::cout << e.getMessage() << std::endl;
