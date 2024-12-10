@@ -2,6 +2,7 @@ use crate::types::{Benchmark, Cvc5BenchmarkRun};
 use crate::ARGS;
 
 use log::error;
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -19,7 +20,11 @@ pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Cvc5Bench
     let duration = start.elapsed();
 
     let stderr = String::from_utf8(output.stderr).unwrap();
-    if !output.status.success() && output.status.code().unwrap_or(0) != 6 {
+    let exit_code = output
+        .status
+        .code()
+        .unwrap_or(output.status.signal().unwrap_or(100000));
+    if !output.status.success() && exit_code != 6 {
         error!(
             "CVC5 failed with error ({:?})!\n Benchmark File: {:?} \n ERROR: {:?}",
             output.status, &benchmark.path, &stderr
@@ -32,7 +37,7 @@ pub(super) fn process(cvc5cmd: &Path, benchmark: &Benchmark) -> Option<Cvc5Bench
 
     return Some(Cvc5BenchmarkRun {
         bench_id: benchmark.id,
-        exit_code: output.status.code().unwrap_or(100000),
+        exit_code,
         time_ms: duration
             .as_millis()
             .try_into()

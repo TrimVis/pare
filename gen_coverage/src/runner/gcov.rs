@@ -261,7 +261,10 @@ fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
         // Ignore include files and build dir files, as we can not optimize over them anyways
         if !ARGS.no_ignore_libs
             && (file.file.starts_with("/usr/include")
-                || file.file.starts_with(&ARGS.build_dir.display().to_string()))
+                || file.file.starts_with(&ARGS.build_dir.display().to_string())
+                || file
+                    .file
+                    .starts_with(&ARGS.build_dir.canonicalize()?.display().to_string()))
         {
             continue;
         }
