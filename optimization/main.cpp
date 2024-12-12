@@ -273,6 +273,10 @@ int main(int argc, char *argv[]) {
       std::string model_name = BASE_MODEL_NAME + "_p" + std::to_string(p);
       model.set(GRB_StringAttr_ModelName, model_name);
 
+      // Better logging
+      model.set(GRB_IntParam_LogToConsole, 1);
+      model.set(GRB_StringParam_LogFile, "gurobi.log");
+
       std::cout << " |>> Preparing optimization" << std::endl;
 
       // Add variables O
@@ -318,15 +322,63 @@ int main(int argc, char *argv[]) {
       }
       model.addConstr(sum_z >= p * no_benchs, "c0");
 
-      // Optimize model
-      std::cout << " |>> Running optimization" << std::endl;
-      model.optimize();
+      // Write out the initial model
+      std::cout << " |>> Storing initial model" << std::endl;
+      model.write("initial_model_" + model_name + ".lp");
 
-      // Write out the model for potential further analysis
-      std::cout << " |>> Storing model" << std::endl;
-      model.write("model_" + model_name + ".lp");
+      // 10 hour max runtime limit
+      const double max_run_time = 60.0 * 60.0 * 10.0;
 
-      std::cout << " |>> Optimization finished!" << std::endl;
+      // Parameters for iterative solving:
+      double time_limit = 1800.0; // 30 minutes per iteration
+      model.set(GRB_DoubleParam_TimeLimit, time_limit);
+
+      double run_time = 0.0;
+      while (run_time <= max_run_time) {
+        std::cout << " |>> Running optimization step" << std::endl;
+        model.optimize();
+
+        int status = model.get(GRB_IntAttr_Status);
+
+        if (status == GRB_TIME_LIMIT) {
+          std::cout << " |>> Time limit reached, saving checkpoint."
+                    << std::endl;
+
+          // If a feasible solution has been found, write it out
+          double objVal = model.get(GRB_DoubleAttr_ObjVal);
+          if (objVal < GRB_INFINITY) {
+            model.write("checkpoint_solution_" + model_name + ".sol");
+            std::cout << " |>> Feasible solution saved to checkpoint_solution_"
+                      << model_name << ".sol" << std::endl;
+          }
+
+          // Write out the model as well
+          model.write("checkpoint_model_" + model_name + ".lp");
+          std::cout << " |>> Model written to checkpoint_model_" << model_name
+                    << ".lp" << std::endl;
+
+          run_time += time_limit;
+          // Extend time limit by 15 minutes
+          time_limit += 900.0;
+          model.set(GRB_DoubleParam_TimeLimit, time_limit);
+        } else {
+          if (status == GRB_OPTIMAL) {
+            std::cout << " |>> Optimal solution found." << std::endl;
+          } else if (status == GRB_INFEASIBLE) {
+            std::cout << " |>> Model is infeasible." << std::endl;
+          } else if (status == GRB_UNBOUNDED) {
+            std::cout << " |>> Model is unbounded." << std::endl;
+          } else if (status == GRB_INF_OR_UNBD) {
+            std::cout << " |>> Model is infeasible or unbounded." << std::endl;
+          } else {
+            std::cout << " |>> Unexpected status " << status << ", stopping."
+                      << std::endl;
+          }
+          break;
+        }
+      }
+
+      std::cout << std::endl << " |>> Optimization concluded" << std::endl;
       if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
         double objVal = model.get(GRB_DoubleAttr_ObjVal);
         // Total code length before optimization
@@ -372,20 +424,6 @@ int main(int argc, char *argv[]) {
           func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
         }
         store_used_functions_to_db(func_state, uids, p);
-      } else {
-        int status = model.get(GRB_IntAttr_Status);
-        std::string statusStr;
-        if (status == GRB_INFEASIBLE) {
-          statusStr = "INFEASIBLE";
-        } else if (status == GRB_UNBOUNDED) {
-          statusStr = "UNBOUNDED";
-        } else if (status == GRB_INF_OR_UNBD) {
-          statusStr = "INF_OR_UNBD";
-        } else {
-          statusStr = "Unknown case (" + std::to_string(status) + ")";
-        }
-        std::cout << "Could not find optimal result. Exit status: " << statusStr
-                  << std::endl;
       }
 
       model.reset();
