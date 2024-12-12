@@ -85,6 +85,8 @@ fn replace_lines_in_file(
     if !PRINT_ONLY {
         // Replace the original file with the temporary file
         fs::rename(temp_file_path, file_path)?;
+    } else {
+        fs::remove_file(temp_file_path)?;
     }
 
     Ok(())
@@ -125,6 +127,12 @@ fn get_rarely_used_lines(
             if path.starts_with("/local/home/jordanpa/cvc5-repo/build/") {
                 continue;
             }
+            // FIXME: Find a better way to filter out edge cases
+            if path == "/local/home/jordanpa/cvc5-repo/src/api/cpp/cvc5.cpp" {
+                if start_line >= 7743 && end_line <= 7839 {
+                    continue;
+                }
+            }
             // FIXME: This is for local testing only
             let path = path.replace("/local/home/jordanpa/", "../../");
             if prev_src != path {
@@ -133,6 +141,7 @@ fn get_rarely_used_lines(
                 prev_src = path;
             }
 
+            // FIXME: Detect Constructors in a better way
             // FIXME: Detect deconstructors in a better way
             if name.contains("::~") {
                 continue;
@@ -159,8 +168,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Lines to be replaced: {:?}", line_ranges);
         replace_lines_in_file(
             &file,
-            // FIXME: This currently assumes that stdio has already been imported,
-            // we should check that
             "std::cout << \"Unsupported feature\" << std::endl; exit(1000); __builtin_unreachable();",
             &vec!["#include <iostream>".to_string()],
             &line_ranges

@@ -8,25 +8,24 @@ benchurl := "https://zenodo.org/api/records/11061097/files-archive"
 benchdir := "benchmarks/nonincremental_2024.04.23/"
 reportsdir := "reports"
 
-system_python := "python3"
-python := ".venv/bin/python3"
 cargo := ".cargo/bin/cargo"
 cargo_env := ".cargo"
 
 alias b := build
 alias m := bench-measure
 alias o := bench-optimize
+alias r := bench-remover
 
-build: build-cvc5 build-rust build-optimize
+build: build-cvc5 build-remover build-measure build-optimize
     
-setup: setup-cvc5 setup-python setup-rust setup-gurobi
+setup: setup-cvc5 setup-rust setup-gurobi
 
 tidy:
     rm -rf /tmp/coverage_reports
     cd "{{cvc5dir}}/build" && make coverage-reset
 
 # Generate a coverage report
-bench-measure CORES=num_cpus(): build-rust
+bench-measure CORES=num_cpus(): build-measure
     ./gen_coverage/target/release/gen_coverage \
         -i -j {{CORES}} \
         --build-dir ../cvc5-repo/build/ \
@@ -38,10 +37,15 @@ bench-measure CORES=num_cpus(): build-rust
 # Find a solution to our optimization problem
 bench-optimize +P_VALUES: build-optimize
     ./benchopt {{P_VALUES}}
+        
+# Remove rarely used code segments
+bench-remover: build-remover
+    ./code_remover/target/release/code_remover 
+    @echo "Removed all rarely used functions from code base"
 
-download_bench:
+download-bench:
     mkdir -p "{{benchdir}}"
-    rm files-archive
+    rm -f files-archive
     # Downloading benchmarks, this may take a bit (~4.5GB download)
     wget "{{benchurl}}" --show-progress
     # Unpacking archive
@@ -53,10 +57,13 @@ download_bench:
 
 # Clones and builds cvc5 with coverage support
 build-cvc5: setup-cvc5
-    cd {{cvc5dir}} && ./configure.sh debug --auto-download --coverage --poly --cocoa --gpl
+    cd {{cvc5dir}} && ./configure.sh debug --auto-download --pyvenv --coverage --poly --cocoa --gpl
     cd "{{cvc5dir}}/build" && make -j $(nproc)
 
-build-rust: setup-rust
+build-remover: setup-rust
+    cd "code_remover" && CARGO_HOME="../{{cargo_env}}" RUSTFLAGS='-C target-cpu=native' ../{{cargo}} build --release
+
+build-measure: setup-rust
     cd "gen_coverage" && CARGO_HOME="../{{cargo_env}}" RUSTFLAGS='-C target-cpu=native' ../{{cargo}} build --release
 
 build-optimize: setup-gurobi
@@ -86,14 +93,6 @@ setup-gurobi:
         rm gurobi11.0.3_linux64.tar.gz
         rm gurobi11.0.3_linux64.tar.gz.md5
         rm -rf gurobi1103
-    fi
-
-setup-python:
-    #!/usr/bin/env sh
-    if test ! -e .venv; then
-        {{ system_python }} -m venv .venv; 
-        {{ python }} -m pip install --upgrade pip
-        {{ python }} -m pip install -r ./code_remover/requirements.txt
     fi
 
 setup-rust:
