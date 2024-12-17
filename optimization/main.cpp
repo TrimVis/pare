@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 #include <sstream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 const std::string DB_FILE = "./reports/report.sqlite";
@@ -258,8 +259,20 @@ int main(int argc, char *argv[]) {
   std::vector<int> uids;
   std::vector<int> len_c;
   std::vector<std::vector<bool>> B;
-
   get_function_stats_from_db(no_benchs, n, uids, len_c, B);
+
+  long pages = sysconf(_SC_AVPHYS_PAGES);
+  long page_size = sysconf(_SC_PAGE_SIZE);
+
+  if (pages == -1 || page_size == -1) {
+    std::cerr << "Error getting memory information" << std::endl;
+    return 1;
+  }
+  long available_mem = pages * page_size / (1024 * 1024 * 1024);
+  long node_file_mem = 0.5 * available_mem;
+  std::cout << " |>> Using Nodefile after 50% of memory is in use ("
+            << node_file_mem << "GB)" << std::endl;
+
   try {
     for (int i = 1; i < argc; i++) {
       double p = std::stod(argv[i]);
@@ -272,6 +285,7 @@ int main(int argc, char *argv[]) {
       GRBModel model = GRBModel(*env);
       std::string model_name = BASE_MODEL_NAME + "_p" + std::to_string(p);
       model.set(GRB_StringAttr_ModelName, model_name);
+      model.set(GRB_DoubleParam_NodefileStart, node_file_mem);
 
       // Better logging
       model.set(GRB_IntParam_LogToConsole, 1);
