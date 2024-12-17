@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection, OpenFlags};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 
@@ -92,6 +93,82 @@ fn replace_lines_in_file(
     Ok(())
 }
 
+fn check_func_range_correctness(
+    db_path: &str,
+) -> Result<HashMap<(String, String), (i64, i64)>, Box<dyn std::error::Error>> {
+    let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+
+    let stmt = format!(
+        "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
+    FROM \"functions\" AS f
+    JOIN \"sources\" AS s ON s.id = f.source_id
+    ORDER BY s.path, f.start_line",
+    );
+    let mut stmt = conn.prepare(&stmt)?;
+    let rows = stmt.query_map(params![], |row| {
+        let path: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let start_line: usize = row.get(2)?;
+        let start_col: usize = row.get(3)?;
+        let end_line: usize = row.get(4)?;
+        let end_col: usize = row.get(5)?;
+
+        Ok((path, name, start_line, start_col, end_line, end_col))
+    })?;
+    let mut func_line_deviations: HashMap<(String, String), (i64, i64)> = HashMap::new();
+    for row in rows {
+        if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
+            // FIXME: Filter these out ahead of time
+            if path.starts_with("/local/home/jordanpa/cvc5-repo/build/") {
+                continue;
+            }
+
+            // FIXME: Detect Constructors in a better way
+            // FIXME: Detect destructors in a better way
+            if name.contains("::~") {
+                continue;
+            }
+
+            // FIXME: This is for local testing only
+            let path = path.replace("/local/home/jordanpa/", "../../");
+
+            let input = File::open(&path)?;
+            let reader = BufReader::new(input);
+
+            let mut real_start_line = start_line;
+            let mut real_end_line = end_line;
+
+            let mut func_body_entered = false;
+            for (line_no, line) in reader.lines().enumerate().skip(start_line) {
+                let line_no = line_no + 1;
+                let line = line?;
+
+                // If inside the specified write lines until the body block has started
+                if !func_body_entered {
+                    func_body_entered = line.ends_with("{");
+                    if func_body_entered {
+                        real_start_line = line_no;
+                    }
+                }
+
+                if func_body_entered {
+                    if line_no <= end_line - 2 {
+                        continue;
+                    } else if line.ends_with("}") {
+                        real_end_line = line_no;
+                        break;
+                    }
+                }
+            }
+
+            let start_deviation = (real_start_line as i64) - (start_line as i64);
+            let end_deviation = (real_end_line as i64) - (end_line as i64);
+            func_line_deviations.insert((path, name), (start_deviation, end_deviation));
+        }
+    }
+    Ok(func_line_deviations)
+}
+
 fn get_rarely_used_lines(
     db_path: &str,
     table_name: &str,
@@ -157,7 +234,38 @@ fn get_rarely_used_lines(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let rarely_used = get_rarely_used_lines("../report.sqlite", "optimization_result_p0_9900")?;
+    let db = "../report.sqlite";
+    let line_deviations = check_func_range_correctness(db)?;
+
+    let mut total_count = 0;
+    let mut dev_count = 0;
+    let mut avg_start = 0.0;
+    let mut avg_end = 0.0;
+    for ((_path, _name), (start_dev, end_dev)) in line_deviations {
+        total_count += 1;
+
+        if start_dev != 0 || end_dev != 0 {
+            avg_start += start_dev as f64;
+            avg_end += end_dev as f64;
+            dev_count += 1;
+        }
+    }
+    avg_start /= total_count as f64;
+    avg_end /= total_count as f64;
+
+    if dev_count <= total_count {
+        println!(
+            "Functions with wrong line numbers: {} of {}",
+            dev_count, total_count
+        );
+        println!(
+            "Average Deviation:\n\t Start: {}\n\t End: {}",
+            avg_start, avg_end
+        );
+        return Ok(());
+    }
+
+    let rarely_used = get_rarely_used_lines(db, "optimization_result_p0_9900")?;
 
     for (file, line_ranges) in rarely_used {
         // if !file.ends_with("sat_solver_types.h") {
