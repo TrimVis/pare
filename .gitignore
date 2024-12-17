@@ -17,6 +17,7 @@ __pycache__
 *.out
 *.backup
 /benchopt
+/evaluate_sol
 output.log
 gurobi.lic
 rustup_installer.sh

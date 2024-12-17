@@ -37,6 +37,10 @@ bench-measure CORES=num_cpus(): build-measure
 # Find a solution to our optimization problem
 bench-optimize +P_VALUES: build-optimize
     ./benchopt {{P_VALUES}}
+
+# Evaluate solutions to our optimization problem
+bench-optimize-eval +SOL_FILES: build-optimize-eval
+    ./evaluate_sol {{SOL_FILES}}
         
 # Remove rarely used code segments
 bench-remover: build-remover
@@ -67,7 +71,10 @@ build-measure: setup-rust
     cd "gen_coverage" && CARGO_HOME="../{{cargo_env}}" RUSTFLAGS='-C target-cpu=native' ../{{cargo}} build --release
 
 build-optimize: setup-gurobi
-    g++ -o benchopt ./optimization/main.cpp -I.gurobi/include -L.gurobi/lib -Wl,-rpath,.gurobi/lib -lgurobi_c++ -lgurobi110 -lsqlite3 -std=c++11
+    g++ -o benchopt ./optimization/main.cpp -I.gurobi/include -L.gurobi/lib -Wl,-rpath,.gurobi/lib -lgurobi_c++ -lgurobi110 -lsqlite3 -std=c++11 -O3
+
+build-optimize-eval:
+    g++ -o evaluate_sol ./optimization/evaluate_sol.cpp -lsqlite3 -std=c++11 -O3
 
 setup-cvc5:
     mkdir -p "{{cvc5dir}}";
