@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
+#include <gurobi_c.h>
 #include <iostream>
 #include <optional>
 #include <sqlite3.h>
@@ -13,7 +14,7 @@
 
 const std::string BASE_MODEL_NAME = "benchopt";
 
-// NOTE: Scales the model down
+// NOTE: Scales the model down, if set
 const std::optional<float> SCALER = {};
 
 int main(int argc, char *argv[]) {
@@ -91,7 +92,7 @@ int main(int argc, char *argv[]) {
       std::vector<GRBVar> z(no_benchs);
       for (int i = 0; i < no_benchs; ++i) {
         z[i] =
-            model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "z_" + std::to_string(i));
+            model.addVar(0.0, 1.0, 1.0, GRB_BINARY, "z_" + std::to_string(i));
       }
 
       // Add constraints
@@ -102,18 +103,20 @@ int main(int argc, char *argv[]) {
             J_i.push_back(j);
           }
         }
-        // For each j in J_i, add z[i] <= O[j]
+
+        std::string constr_name = "c_bench_" + std::to_string(i);
+        GRBVar carry =
+            model.addVar(1.0, 1.0, 1.0, GRB_BINARY, constr_name + "_initial");
         for (int j : J_i) {
-          model.addConstr(z[i] <= O[j], "c_bench_" + std::to_string(i) +
-                                            "_upper_" + std::to_string(j));
+          GRBVar j_var =
+              model.addVar(0.0, 1.0, 1.0, GRB_BINARY,
+                           constr_name + "carry_" + std::to_string(j));
+          model.addConstr(j_var == j * carry,
+                          constr_name + "sum_" + std::to_string(j));
+
+          carry = j_var;
         }
-        // Add constraint z[i] >= sum_j O[j] - len(J_i) + 1
-        GRBLinExpr sum_Oj = 0;
-        for (int j : J_i) {
-          sum_Oj += O[j];
-        }
-        model.addConstr(z[i] >= sum_Oj - J_i.size() + 1,
-                        "c_bench_" + std::to_string(i) + "_lower");
+        model.addConstr(z[i] == carry, constr_name);
       }
 
       // Add constraint z.sum() >= p * no_benchs
