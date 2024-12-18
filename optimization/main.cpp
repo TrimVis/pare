@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
   try {
     for (int i = optind; i < argc; i++) {
       double p = std::stod(argv[i]);
-      assert(p < 1.0 && "Expected a p value of less than 1.0");
+      assert(p <= 1.0 && "Expected a p value of less than 1.0");
       std::cout << std::endl
                 << std::endl
                 << " |>> Starting optimization run for p=" << p << std::endl;
@@ -81,31 +81,34 @@ int main(int argc, char *argv[]) {
 
       std::cout << " |>> Preparing optimization" << std::endl;
 
-      // Add variables O
+      // Add variables O (results in objective sum_j O[j] * len(c_j))
       std::vector<GRBVar> O(n);
       for (int i = 0; i < n; ++i) {
         O[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
                             "O_" + std::to_string(i));
       }
 
-      // Add variables z
+      // Add constraint that ensures z[i] = Prod for j in C_i (O[j])
       std::vector<GRBVar> z(no_benchs);
       for (int i = 0; i < no_benchs; ++i) {
-        z[i] =
-            model.addVar(0.0, 1.0, 1.0, GRB_BINARY, "z_" + std::to_string(i));
-      }
+        std::string var_name = "z_" + std::to_string(i);
+        z[i] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, var_name);
 
-      // Add constraints
-      for (int i = 0; i < no_benchs; ++i) {
-        std::string constr_name = "z_prod_" + std::to_string(i) + "_";
+        std::string constr_name = var_name + "_prod_";
+        GRBLinExpr sum_o = 0;
+        int fac = 0;
         for (int j = 0; j < n; ++j) {
           if (B[j][i]) {
-            model.addConstr(z[i] <= O[j], constr_name + std::to_string(j));
+            fac += 1;
+            sum_o += O[j];
           }
         }
+
+        model.addConstr(0 <= z[i], constr_name + "lower");
+        model.addConstr(fac * z[i] <= sum_o, constr_name + "upper");
       }
 
-      // Add constraint z.sum() >= p * no_benchs
+      // Add main constraint z.sum() >= p * no_benchs
       GRBLinExpr sum_z = 0;
       for (int i = 0; i < no_benchs; ++i) {
         sum_z += z[i];
