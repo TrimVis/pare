@@ -97,26 +97,12 @@ int main(int argc, char *argv[]) {
 
       // Add constraints
       for (int i = 0; i < no_benchs; ++i) {
-        std::vector<int> J_i;
+        std::string constr_name = "z_prod_" + std::to_string(i) + "_";
         for (int j = 0; j < n; ++j) {
           if (B[j][i]) {
-            J_i.push_back(j);
+            model.addConstr(z[i] <= O[j], constr_name + std::to_string(j));
           }
         }
-
-        std::string constr_name = "c_bench_" + std::to_string(i);
-        GRBVar carry =
-            model.addVar(1.0, 1.0, 1.0, GRB_BINARY, constr_name + "_initial");
-        for (int j : J_i) {
-          GRBVar j_var =
-              model.addVar(0.0, 1.0, 1.0, GRB_BINARY,
-                           constr_name + "carry_" + std::to_string(j));
-          model.addConstr(j_var == j * carry,
-                          constr_name + "sum_" + std::to_string(j));
-
-          carry = j_var;
-        }
-        model.addConstr(z[i] == carry, constr_name);
       }
 
       // Add constraint z.sum() >= p * no_benchs
