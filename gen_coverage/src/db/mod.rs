@@ -1,7 +1,7 @@
 mod init;
 use crate::args::{TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::{GcovBitvec, GcovRes};
-use crate::types::{Benchmark, Cvc5BenchmarkRun};
+use crate::types::{Benchmark, BenchmarkRun};
 use crate::{ResultT, ARGS};
 
 use itertools::Itertools;
@@ -72,8 +72,8 @@ impl DbWriter {
         Ok(result)
     }
 
-    pub fn add_cvc5_run_result(&mut self, run_result: Cvc5BenchmarkRun) -> ResultT<()> {
-        let mut stmt_insert_cvc5result = self
+    pub fn add_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
+        let mut stmt_insert_runresult = self
             .conn
             .prepare_cached(
                 "INSERT INTO \"result_benchmarks\" (
@@ -85,7 +85,7 @@ impl DbWriter {
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .expect("Issue during benchmark status update query preparation");
-        stmt_insert_cvc5result
+        stmt_insert_runresult
             .execute(params![
                 run_result.bench_id,
                 run_result.time_ms,
@@ -93,7 +93,7 @@ impl DbWriter {
                 run_result.stdout,
                 run_result.stderr,
             ])
-            .expect("Issue during cvc5 run result insertion!");
+            .expect("Issue during run result insertion!");
         Ok(())
     }
 

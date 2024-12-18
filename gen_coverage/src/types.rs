@@ -53,7 +53,7 @@ pub struct Benchmark {
     pub prefix: Option<PathBuf>,
 }
 
-pub struct Cvc5BenchmarkRun {
+pub struct BenchmarkRun {
     pub bench_id: u64,
     pub time_ms: u64,
     pub exit_code: i32,

@@ -467,7 +467,7 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "gen_coverage"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bitvec",
  "chrono",
@@ -489,6 +489,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "shellwords",
 ]
 
 [[package]]
@@ -1048,6 +1049,16 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shellwords"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89e515aa4699a88148ed5ef96413ceef0048ce95b43fbc955a33bde0a70fcae6"
+dependencies = [
+ "lazy_static",
+ "regex",
 ]
 
 [[package]]

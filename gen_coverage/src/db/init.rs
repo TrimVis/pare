@@ -1,4 +1,4 @@
-use crate::args::{TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{EXEC_PLACEHOLDER, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::{ResultT, ARGS};
 
 use glob::glob;
@@ -132,7 +132,12 @@ pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
 
     tx.execute(&c_insert, params!["job_size", ARGS.job_size])?;
 
-    tx.execute(&c_insert, params!["cvc5_args", ARGS.cvc5_args])?;
+    tx.execute(&c_insert, params!["exec", ARGS.exec])?;
+
+    tx.execute(
+        &c_insert,
+        params!["parsed_exec", format!("{:?}", EXEC_PLACEHOLDER)],
+    )?;
 
     tx.execute(
         &c_insert,

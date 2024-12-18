@@ -1,5 +1,5 @@
-use super::cvc5;
 use super::gcov;
+use super::run;
 use super::ProcessingQueueMessage;
 use super::ProcessingStatusMessage;
 use super::RunnerQueueMessage;
@@ -40,8 +40,6 @@ impl Worker {
     ) -> Worker {
         let thread = thread::spawn(move || {
             loop {
-                let cvc5cmd = Path::join(&ARGS.build_dir, "bin/cvc5");
-
                 let job = receiver.recv();
                 match job {
                     Ok(RunnerQueueMessage::Start(benchmark)) => {
@@ -51,11 +49,11 @@ impl Worker {
                         } else {
                             None
                         };
-                        let cvc5_result = cvc5::process(&cvc5cmd, &benchmark).unwrap();
-                        let res_exit = cvc5_result.exit_code;
+                        let run_result = run::process(&benchmark).unwrap();
+                        let res_exit = run_result.exit_code;
                         if log::max_level() >= LevelFilter::Debug {
                             debug!(
-                                "[Worker {}] Ran cvc5 in {}ms (bench_id: {})",
+                                "[Worker {}] Executed benchmark run in {}ms (bench_id: {})",
                                 id,
                                 start.unwrap().elapsed().as_millis(),
                                 benchmark.id
@@ -91,7 +89,7 @@ impl Worker {
 
                             match processing_queue.send((
                                 benchmark.id,
-                                cvc5_result,
+                                run_result,
                                 Some(gcov_result),
                             )) {
                                 Ok(_) => {
@@ -106,7 +104,7 @@ impl Worker {
                                 }
                             }
                         } else {
-                            match processing_queue.send((benchmark.id, cvc5_result, None)) {
+                            match processing_queue.send((benchmark.id, run_result, None)) {
                                 Ok(_) => {
                                     debug!(
                                         "[Worker {}] Queued GCOV result (bench_id: {})",
@@ -119,7 +117,7 @@ impl Worker {
                                 }
                             }
                             debug!(
-                                "[Worker {}] Cvc5 Exit Code was {}... Skipping gcov",
+                                "[Worker {}] Benchmark Run Exit Code was {}... Skipping gcov",
                                 id, res_exit
                             );
                         }
@@ -203,7 +201,7 @@ impl Worker {
 
                 let job = receiver.recv();
                 match job {
-                    Ok((bench_id, cvc5_result, gcov_result)) => {
+                    Ok((bench_id, run_result, gcov_result)) => {
                         let start = if log::max_level() >= LevelFilter::Debug {
                             Some(Instant::now())
                         } else {
@@ -211,10 +209,10 @@ impl Worker {
                         };
                         info!("[DB Writer] Received a result (bench_id: {})", bench_id);
                         debug!(
-                            "[DB Writer] Writing cvc5 result to DB (bench_id: {})",
+                            "[DB Writer] Writing run result to DB (bench_id: {})",
                             bench_id
                         );
-                        db.add_cvc5_run_result(cvc5_result).unwrap();
+                        db.add_run_result(run_result).unwrap();
                         if let Some(gcov_result) = gcov_result {
                             debug!(
                             "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",

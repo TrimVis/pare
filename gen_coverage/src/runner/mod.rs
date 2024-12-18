@@ -1,11 +1,11 @@
-mod cvc5;
 mod gcov;
+mod run;
 mod worker;
 pub use gcov::GcovBitvec;
 pub use gcov::GcovRes;
 use log::{error, warn};
 
-use crate::types::{Benchmark, Cvc5BenchmarkRun};
+use crate::types::{Benchmark, BenchmarkRun};
 use crate::ARGS;
 
 use crossbeam::channel;
@@ -17,7 +17,7 @@ enum RunnerQueueMessage {
     Stop,
 }
 
-type ProcessingQueueMessage = (u64, Cvc5BenchmarkRun, Option<GcovRes>);
+type ProcessingQueueMessage = (u64, BenchmarkRun, Option<GcovRes>);
 
 enum ProcessingStatusMessage {
     DbInitSuccess,

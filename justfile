@@ -28,10 +28,11 @@ tidy:
 bench-measure CORES=num_cpus(): build-measure
     ./gen_coverage/target/release/gen_coverage \
         -i -j {{CORES}} \
-        --build-dir ../cvc5-repo/build/ \
+        --build-dir "{{cvc5dir}}/build" \
         --coverage-kinds functions \
         "{{benchdir}}" \
-        "{{reportsdir}}/report.sqlite"
+        "{{reportsdir}}/report.sqlite" \
+        -- "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}"
     @echo "Created report at '{{reportsdir}}/report.sqlite'"
 
 # Find a solution to our optimization problem

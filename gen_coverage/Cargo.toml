@@ -1,6 +1,6 @@
 [package]
 name = "gen_coverage"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 
@@ -27,6 +27,7 @@ rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
 sha2 = "0.10.8"
+shellwords = "1.1.0"
 
 [profile.release]
 opt-level = 3          

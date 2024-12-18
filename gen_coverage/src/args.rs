@@ -12,6 +12,7 @@ use crate::info;
 // Global static variable to store parsed CLI arguments
 pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
     let mut args = CliArgs::parse();
+
     // Initialize `tmp_dir` if it hasn't been explicitly provided
     if args.tmp_dir.is_none() {
         let tmp_base_dir = Path::new("/tmp/coverage_reports");
@@ -33,6 +34,13 @@ pub static TRACK_LINES: Lazy<bool> =
     Lazy::new(|| ARGS.coverage_kinds.contains(&CoverageKind::Lines));
 pub static TRACK_BRANCHES: Lazy<bool> =
     Lazy::new(|| ARGS.coverage_kinds.contains(&CoverageKind::Branches));
+pub static EXEC_PLACEHOLDER: Lazy<Vec<String>> = Lazy::new(|| {
+    assert!(
+        ARGS.exec.contains("{}"),
+        "Could not find '{{}}' in exec arg, use this as a placeholder for the benchmark file argument"
+    );
+    shellwords::split(&ARGS.exec).expect("Could not parse executable command")
+});
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
 pub enum CoverageMode {
@@ -82,11 +90,6 @@ pub struct CliArgs {
     #[arg(short, long)]
     pub build_dir: PathBuf,
 
-    // TODO: Fix that you can't really pass the argument atm
-    /// Arguments for cvc5
-    #[arg(short = 'a', long, default_value = "--tlimit 5000")]
-    pub cvc5_args: String,
-
     /// Kinds of code elements for which usage data will be collected
     #[arg(
         short = 'k',
@@ -125,4 +128,6 @@ pub struct CliArgs {
 
     /// Database which will contain the benchmark results
     pub result_db: PathBuf,
+
+    pub exec: String,
 }
