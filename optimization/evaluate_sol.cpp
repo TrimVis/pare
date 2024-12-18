@@ -1,6 +1,7 @@
+#include "util.h"
+#include <bits/getopt_core.h>
 #include <cassert>
 #include <cmath>
-#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -10,90 +11,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-const std::string DB_FILE = "./reports/report.sqlite";
-
-void get_function_stats_from_db(int &no_benchs, int &n, std::vector<int> &uids,
-                                std::vector<int> &len_c,
-                                std::vector<std::vector<bool>> &B) {
-  sqlite3 *db;
-  int rc = sqlite3_open(DB_FILE.c_str(), &db);
-  if (rc) {
-    std::cerr << "Can't open database: " << sqlite3_errmsg(db) << std::endl;
-    exit(1);
-  }
-
-  sqlite3_stmt *stmt;
-  const char *query = "SELECT MAX(benchmark_usage_count) FROM functions";
-  rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
-    exit(1);
-  }
-
-  rc = sqlite3_step(stmt);
-  if (rc == SQLITE_ROW) {
-    no_benchs = sqlite3_column_int(stmt, 0);
-    no_benchs = std::round(no_benchs);
-  } else {
-    std::cerr << "Failed to fetch data: " << sqlite3_errmsg(db) << std::endl;
-    exit(1);
-  }
-  sqlite3_finalize(stmt);
-
-  query = "SELECT id, benchmark_usage_count, start_line, end_line FROM "
-          "functions";
-  rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
-  if (rc != SQLITE_OK) {
-    std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
-    exit(1);
-  }
-
-  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    int uid = sqlite3_column_int(stmt, 0);
-    int bcount = sqlite3_column_int(stmt, 1);
-    int start = sqlite3_column_int(stmt, 2);
-    int end = sqlite3_column_int(stmt, 3);
-
-    uids.push_back(uid);
-    len_c.push_back(end - start + 1);
-  }
-  sqlite3_finalize(stmt);
-
-  n = uids.size();
-
-  query = "SELECT function_id, data FROM function_bitvecs";
-  if (sqlite3_prepare_v2(db, query, -1, &stmt, nullptr) != SQLITE_OK) {
-    std::cerr << "Error preparing SQL statement\n";
-    sqlite3_close(db);
-    exit(1);
-  }
-
-  B.reserve(n);
-  // Process each row
-  while (sqlite3_step(stmt) == SQLITE_ROW) {
-    // Read source_id and function_id as integers
-    int function_id = sqlite3_column_int(stmt, 0);
-
-    // Read the BLOB data
-    const void *blob_data = sqlite3_column_blob(stmt, 1);
-    int blob_size = sqlite3_column_bytes(stmt, 1);
-
-    std::vector<bool> Bi(no_benchs, 0);
-    Bi.reserve(blob_size * 8);
-    const uint8_t *data = static_cast<const uint8_t *>(blob_data);
-
-    for (int i = 0; i < blob_size; ++i) {
-      for (int bit = 0; bit < 8; ++bit) {
-        Bi[i] = (data[i] >> bit) & 1;
-      }
-    }
-    B.push_back(Bi);
-  }
-  sqlite3_finalize(stmt);
-
-  sqlite3_close(db);
-}
 
 std::map<std::string, std::vector<double>>
 evaluate_solution_file(std::string &filename) {
@@ -153,14 +70,34 @@ evaluate_solution_file(std::string &filename) {
 }
 
 int main(int argc, char *argv[]) {
+  std::string db_file = "./reports/report.sqlite";
+
+  int opt;
+  while ((opt = getopt(argc, argv, "d:")) != -1) {
+    switch (opt) {
+    case 'd':
+      db_file = optarg;
+      break;
+    case 'h':
+    case '?':
+    default:
+      std::cout << "Help/Usage Example\n"
+                << argv[0]
+                << " -d <DB_PATH> <SOL-FILE> "
+                   "[<ADD-SOL-FILES>...]"
+                << std::endl;
+      exit(0);
+    }
+  }
+
   std::cout << " |>> Extracting information from DB" << std::endl;
   int no_benchs, n;
   std::vector<int> uids;
   std::vector<int> len_c;
   std::vector<std::vector<bool>> B;
-  get_function_stats_from_db(no_benchs, n, uids, len_c, B);
+  get_function_stats_from_db(db_file, no_benchs, n, uids, len_c, B, {});
 
-  for (int i = 1; i < argc; i++) {
+  for (int i = optind; i < argc; i++) {
     auto filename = std::string(argv[i]);
     std::cout << " |>> Evaluating solution file '" << filename << "'"
               << std::endl;
