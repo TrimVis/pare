@@ -14,15 +14,14 @@
 
 const std::string BASE_MODEL_NAME = "benchopt";
 
-// NOTE: Scales the model down, if set
-const std::optional<float> SCALER = {};
-
 int main(int argc, char *argv[]) {
   std::string db_file = "./reports/report.sqlite";
   std::string license_file = "./optimization/gurobi.lic";
+  // Scales the input size down if set
+  std::optional<float> scaler = {};
 
   int opt;
-  while ((opt = getopt(argc, argv, "d:")) != -1) {
+  while ((opt = getopt(argc, argv, "l:d:s:")) != -1) {
     switch (opt) {
     case 'l':
       license_file = optarg;
@@ -30,12 +29,16 @@ int main(int argc, char *argv[]) {
     case 'd':
       db_file = optarg;
       break;
+    case 's':
+      scaler = std::stof(optarg);
+      break;
     case 'h':
     case '?':
     default:
       std::cout << "Help/Usage Example" << std::endl
                 << argv[0]
-                << " -d <DB_PATH> -l <GUROBI_LICENSE_FILE> <P-VALUE> "
+                << " -s <SAMPLE_FACTOR> -d <DB_PATH> -l <GUROBI_LICENSE_FILE> "
+                   "<P-VALUE> "
                    "[<ADD-P-VALUES>...]"
                 << std::endl;
       exit(0);
@@ -47,7 +50,7 @@ int main(int argc, char *argv[]) {
   std::vector<int> uids;
   std::vector<int> len_c;
   std::vector<std::vector<bool>> B;
-  get_function_stats_from_db(db_file, no_benchs, n, uids, len_c, B, SCALER);
+  get_function_stats_from_db(db_file, no_benchs, n, uids, len_c, B, scaler);
 
   long pages = sysconf(_SC_AVPHYS_PAGES);
   long page_size = sysconf(_SC_PAGE_SIZE);
