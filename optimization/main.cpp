@@ -118,9 +118,9 @@ int main(int argc, char *argv[]) {
       }
       model.addConstr(sum_z >= p * no_benchs, "c0");
 
-      // Write out the initial model
-      std::cout << " |>> Storing initial model" << std::endl;
-      model.write("initial_model_" + model_name + ".lp");
+      // // Write out the initial model
+      // std::cout << " |>> Storing initial model" << std::endl;
+      // model.write("initial_model_" + model_name + ".lp");
 
       // 10 hour max runtime limit
       const double max_run_time = 60.0 * 60.0 * 10.0;
@@ -148,10 +148,11 @@ int main(int argc, char *argv[]) {
                       << model_name << ".sol" << std::endl;
           }
 
-          // Write out the model as well
-          model.write("checkpoint_model_" + model_name + ".lp");
-          std::cout << " |>> Model written to checkpoint_model_" << model_name
-                    << ".lp" << std::endl;
+          // // Write out the model as well
+          // model.write("checkpoint_model_" + model_name + ".lp");
+          // std::cout << " |>> Model written to checkpoint_model_" <<
+          // model_name
+          //           << ".lp" << std::endl;
 
           run_time += time_limit;
           // Extend time limit by 15 minutes
@@ -175,8 +176,8 @@ int main(int argc, char *argv[]) {
       }
 
       std::cout << std::endl << " |>> Optimization concluded" << std::endl;
-      if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
-        double objVal = model.get(GRB_DoubleAttr_ObjVal);
+      double objVal = model.get(GRB_DoubleAttr_ObjVal);
+      if (objVal < GRB_INFINITY) {
         // Total code length before optimization
         std::cout << "Total code length:" << std::endl;
         double total_length_before = 0.0;
@@ -214,13 +215,22 @@ int main(int argc, char *argv[]) {
         std::cout << "No functions in use: " << sum_functions << std::endl;
         std::cout << "Objective: " << objVal << std::endl;
 
-        std::cout << " |>> Storing result in DB" << std::endl;
         std::vector<bool> func_state(n);
         for (int i = 0; i < n; ++i) {
           func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
         }
         store_used_functions_to_db(db_file, func_state, uids, p);
+        std::cout << " |>> Feasible solution saved to DB" << std::endl;
+
+        model.write("solution_" + model_name + ".sol");
+        std::cout << " |>> Feasible solution saved to solution_" << model_name
+                  << ".sol" << std::endl;
       }
+
+      // Write out the model as well
+      model.write("model_" + model_name + ".lp");
+      std::cout << " |>> Model written to model_" << model_name << ".lp"
+                << std::endl;
 
       model.reset();
       delete env;
