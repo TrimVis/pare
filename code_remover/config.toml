@@ -1,0 +1,128 @@
+db = "../reports/report_solved.sqlite"
+p = 0.99
+
+[replace_path_prefix]
+"/local/home/jordanpa/" = "../../"
+
+[ignore]
+constructors = false
+destructors = true
+path_prefix = [
+  "/local/home/jordanpa/cvc5-repo/build/"
+]
+
+[path."/local/home/jordanpa/cvc5-repo/src/api/cpp/cvc5.cpp"]
+line_ranges = [ 
+ [7743, 7839]
+]
+
+[path."/local/home/jordanpa/cvc5-repo/src/preprocessing/passes/unconstrained_simplifier.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/printer/smt2/smt2_printer.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/proof/trust_id.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/prop/minisat/core/Solver.h"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/prop/minisat/mtl/Vec.h"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/prop/minisat/core/Solver.cc"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/smt/smt_solver.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/uf/theory_uf.h"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/linear/callbacks.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/linear/theory_arith_private.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/nl/coverings_solver.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/nl/coverings/cdcac.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/nl/coverings/constraints.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/rewriter/addition.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arith/rewriter/rewrite_atom.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/arrays/theory_arrays_rewriter.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/datatypes/sygus_extension.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/datatypes/theory_datatypes.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/bv_inverter.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/cegqi/ceg_bv_instantiator.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/cegqi/inst_strategy_cegqi.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/ematching/trigger.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/first_order_model.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/fmf/bounded_integers.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/fmf/first_order_model_fmc.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/quantifiers_rewriter.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/skolemize.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/sygus/term_database_sygus.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/term_database.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/sep/theory_sep.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/quantifiers/sygus_inst.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/strings/regexp_operation.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/strings/skolem_cache.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/theory_engine.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/uf/theory_uf_model.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/theory/uf/theory_uf.cpp"]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/expr/skolem_manager.cpp"]
+this = true

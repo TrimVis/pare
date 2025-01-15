@@ -1,29 +1,37 @@
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::params;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
+
+use crate::remover_config::Config;
 
 pub struct Remover {
-    db_path: String,
+    config: Config,
 }
 
 impl Remover {
-    pub fn new(db_path: String) -> Self {
-        Remover { db_path }
+    pub fn new(config_path: PathBuf) -> Self {
+        let mut config_buf = String::new();
+        File::open(config_path)
+            .expect("Could not open config file!")
+            .read_to_string(&mut config_buf)
+            .expect("Could not read config file");
+        let config = toml::from_str(&config_buf).unwrap();
+        Remover { config }
     }
 
-    pub fn remove(
-        &self,
-        table_name: &str,
-        no_change: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let rarely_used = self.get_rarely_used_lines(table_name)?;
+    pub fn remove(&self, no_change: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let rarely_used = self.get_rarely_used_lines()?;
 
         for (file, line_ranges) in rarely_used {
             // if !file.ends_with("sat_solver_types.h") {
             //     continue;
             // }
 
-            println!("\n\nReplacing lines in file: {}", file);
+            println!(
+                "\n\nReplacing lines in file: {}",
+                file.display().to_string()
+            );
             println!("Lines to be replaced: {:?}", line_ranges);
             self.replace_lines_in_file( &file, "std::cout << \"Unsupported feature\" << std::endl; exit(1000); __builtin_unreachable();", &vec!["#include <iostream>".to_string()], &line_ranges, no_change)?;
         }
@@ -33,9 +41,9 @@ impl Remover {
 
     fn get_rarely_used_lines(
         &self,
-        table_name: &str,
-    ) -> Result<Vec<(String, Vec<(usize, usize)>)>, Box<dyn std::error::Error>> {
-        let conn = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    ) -> Result<Vec<(PathBuf, Vec<(usize, usize)>)>, Box<dyn std::error::Error>> {
+        let conn = self.config.connect_to_db()?;
+        let table_name = self.config.get_table_name()?;
 
         let stmt = format!(
             "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
@@ -59,33 +67,33 @@ impl Remover {
         })?;
         let mut result = vec![];
         let mut source_result = vec![];
-        let mut prev_src: String = "".to_string();
+        let mut prev_src: PathBuf = PathBuf::new();
         for row in rows {
             if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
-                // FIXME: Filter these out ahead of time
-                if path.starts_with("/local/home/jordanpa/cvc5-repo/build/") {
+                let path = PathBuf::from(path);
+                if self
+                    .config
+                    .ignore_path(&path, &name, &start_line, &end_line)
+                {
                     continue;
                 }
-                // FIXME: Find a better way to filter out edge cases
-                if path == "/local/home/jordanpa/cvc5-repo/src/api/cpp/cvc5.cpp" {
-                    if start_line >= 7743 && end_line <= 7839 {
-                        continue;
-                    }
+                let prev_path = path.clone();
+                let path = self.config.replace_path_prefix(path);
+                if prev_path != path
+                    && self
+                        .config
+                        .ignore_path(&path, &name, &start_line, &end_line)
+                {
+                    continue;
                 }
-                // FIXME: This is for local testing only
-                let path = path.replace("/local/home/jordanpa/", "../../");
+
                 if prev_src != path {
                     result.push((prev_src, source_result));
                     source_result = vec![];
                     prev_src = path;
                 }
 
-                // FIXME: Detect Constructors in a better way
-                // FIXME: Detect deconstructors in a better way
-                if name.contains("::~") {
-                    continue;
-                }
-                if end_line - start_line >= 1 {
+                if end_line - start_line > 1 {
                     source_result.push((start_line, end_line - 1));
                 }
             }
@@ -97,23 +105,23 @@ impl Remover {
 
     pub fn replace_lines_in_file(
         &self,
-        file_path: &str,
+        file_path: &PathBuf,
         replacement_str: &str,
         additional_imports: &Vec<String>,
         skip_ranges: &Vec<(usize, usize)>,
         no_change: bool,
     ) -> io::Result<()> {
+        if skip_ranges.len() == 0 {
+            return Ok(());
+        }
+
         let input_file = File::open(file_path)?;
         let reader = BufReader::new(input_file);
 
         // Work in temporary file
-        let temp_file_path = format!("{}.tmp", file_path);
+        let temp_file_path = format!("{}.tmp", file_path.to_str().unwrap());
         let temp_file = File::create(&temp_file_path)?;
         let mut writer = io::BufWriter::new(temp_file);
-
-        if skip_ranges.len() == 0 {
-            return Ok(());
-        }
 
         // Prepend required imports
         for line in additional_imports {
