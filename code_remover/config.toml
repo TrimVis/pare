@@ -133,3 +133,14 @@ functions = ["cvc5::internal::expr::NodeValue::null()"]
 
 [path."/local/home/jordanpa/cvc5-repo/src/expr/node.h".ignore]
 functions =  ["cvc5::internal::NodeTemplate<true>::NodeTemplate(cvc5::internal::expr::NodeValue const*)"]
+
+
+# All path configs above this line are probably not needed
+[path."/local/home/jordanpa/cvc5-repo/src/printer/let_binding.cpp".ignore]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/expr/subs.cpp".ignore]
+this = true
+
+[path."/local/home/jordanpa/cvc5-repo/src/prop/sat_solver_types.h".ignore]
+this = true

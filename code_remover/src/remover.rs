@@ -77,6 +77,7 @@ impl Remover {
 
         for row in rows {
             if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
+                let mut end_line = end_line;
                 let path = PathBuf::from(path);
                 if self
                     .config
@@ -94,14 +95,31 @@ impl Remover {
                     continue;
                 }
 
+                let input_file = File::open(path.clone());
+                if input_file.is_err() {
+                    continue;
+                }
+                let reader = BufReader::new(input_file?);
+                let mut bracket_counter: i64 = 0;
+                for (line_no, line) in reader.lines().enumerate().skip(start_line - 1) {
+                    let line = line?;
+                    let open_count = line.chars().filter(|&c| c == '{').count();
+                    let close_count = line.chars().filter(|&c| c == '}').count();
+                    bracket_counter += (open_count as i64) - (close_count as i64);
+                    if bracket_counter <= 0 {
+                        end_line = line_no;
+                        break;
+                    }
+                }
+
                 if prev_src != path {
                     result.push((prev_src, source_result));
                     source_result = vec![];
                     prev_src = path;
                 }
 
-                if end_line - start_line > 1 {
-                    source_result.push((name, start_line, end_line - 1));
+                if end_line as i64 - start_line as i64 > 2 {
+                    source_result.push((name, start_line, end_line));
                 }
             }
         }
