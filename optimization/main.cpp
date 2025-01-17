@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
   try {
     for (int i = optind; i < argc; i++) {
       double p = std::stod(argv[i]);
-      assert(p <= 1.0 && "Expected a p value of less than 1.0");
+      assert(p <= 1.0 && "Expected a p value of <=1.0");
       std::cout << std::endl
                 << std::endl
                 << " |>> Starting optimization run for p=" << p << std::endl;
@@ -95,7 +95,7 @@ int main(int argc, char *argv[]) {
       std::vector<GRBVar> z(no_benchs);
       for (int i = 0; i < no_benchs; ++i) {
         std::string var_name = "z_" + std::to_string(i);
-        z[i] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, var_name);
+        z[i] = model.addVar(0.0, 1.0, 1.0, GRB_BINARY, var_name);
 
         std::string constr_name = var_name + "_prod_";
         GRBLinExpr sum_o = 0;

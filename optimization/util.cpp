@@ -157,6 +157,25 @@ void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
 
   sqlite3_stmt *stmt;
   const char *query = "SELECT MAX(benchmark_usage_count) FROM functions";
+  // rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
+  // if (rc != SQLITE_OK) {
+  //   std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) <<
+  //   std::endl; exit(1);
+  // }
+
+  // rc = sqlite3_step(stmt);
+  // if (rc == SQLITE_ROW) {
+  //   no_benchs = sqlite3_column_int(stmt, 0);
+  //   if (scaler.has_value()) {
+  //     no_benchs = std::round(no_benchs * scaler.value());
+  //   }
+  // } else {
+  //   std::cerr << "Failed to fetch data: " << sqlite3_errmsg(db) << std::endl;
+  //   exit(1);
+  // }
+  // sqlite3_finalize(stmt);
+
+  query = "SELECT COUNT(*) FROM benchmarks";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
@@ -166,20 +185,20 @@ void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
   rc = sqlite3_step(stmt);
   if (rc == SQLITE_ROW) {
     no_benchs = sqlite3_column_int(stmt, 0);
-    if (scaler.has_value()) {
-      no_benchs = std::round(no_benchs * scaler.value());
-    }
   } else {
     std::cerr << "Failed to fetch data: " << sqlite3_errmsg(db) << std::endl;
     exit(1);
   }
   sqlite3_finalize(stmt);
 
-  query = "SELECT id, benchmark_usage_count, start_line, end_line FROM "
-          "functions";
+  query = "SELECT id, benchmark_usage_count, start_line, end_line, data "
+          " FROM functions"
+          " JOIN function_bitvecs AS fb ON id = fb.function_id "
+          " ORDER BY id";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
+    sqlite3_close(db);
     exit(1);
   }
 
@@ -191,42 +210,37 @@ void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
 
     uids.push_back(uid);
     len_c.push_back(end - start + 1);
-  }
-  sqlite3_finalize(stmt);
-
-  n = uids.size();
-
-  query = "SELECT function_id, data FROM function_bitvecs";
-  if (sqlite3_prepare_v2(db, query, -1, &stmt, nullptr) != SQLITE_OK) {
-    std::cerr << "Error preparing SQL statement\n";
-    sqlite3_close(db);
-    exit(1);
-  }
-
-  B.reserve(n);
-  // Process each row
-  while (sqlite3_step(stmt) == SQLITE_ROW) {
-    // Read source_id and function_id as integers
-    int function_id = sqlite3_column_int(stmt, 0);
 
     // Read the BLOB data
-    const void *blob_data = sqlite3_column_blob(stmt, 1);
-    int blob_size = sqlite3_column_bytes(stmt, 1);
-
-    std::vector<bool> Bi(no_benchs, 0);
-    Bi.reserve(blob_size * 8);
+    const void *blob_data = sqlite3_column_blob(stmt, 4);
+    int blob_size = sqlite3_column_bytes(stmt, 4);
     const uint8_t *data = static_cast<const uint8_t *>(blob_data);
 
+    std::vector<bool> Bi(no_benchs, false);
+    Bi.reserve(blob_size * 8);
+
+    int b_count = 0;
     for (int i = 0; i < blob_size; ++i) {
-      for (int bit = 0; bit < 8; ++bit) {
-        Bi[i] = (data[i] >> bit) & 1;
+      for (uint8_t bit = 0; bit < 8; ++bit) {
+        Bi[8 * i + (7 - bit)] = (data[i] >> bit) & 1;
+        b_count += Bi[8 * i + bit];
       }
     }
+    // std::cout << "Expected: " << bcount << " but extracted " << b_count
+    //           << std::endl;
+    // // assert((void("Counts do not match!!!"), bcount == b_count));
+
+    // for (int i = 0; i < 16; i++) {
+    //   std::cout << " " << Bi[i];
+    // }
+    // std::cout << std::endl;
     B.push_back(Bi);
   }
   sqlite3_finalize(stmt);
 
   sqlite3_close(db);
+
+  n = uids.size();
 }
 
 GRBEnv *get_env_from_license(const std::string &file_path) {
