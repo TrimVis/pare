@@ -33,7 +33,13 @@ impl Remover {
                 file.display().to_string()
             );
             println!("Lines to be replaced: {:?}", line_ranges);
-            self.replace_lines_in_file( &file, "std::cout << \"Unsupported feature\" << std::endl; exit(1000); __builtin_unreachable();", &vec!["#include <iostream>".to_string()], &line_ranges, no_change)?;
+
+            let imports = vec!["#include <iostream>".to_string()];
+            let replacement = format!(
+                "std::cout << \"Unsupported feature '{}': '{{}}'\" << std::endl; exit(1000); __builtin_unreachable();", 
+                file.display().to_string()
+            );
+            self.replace_lines_in_file(&file, &replacement, &imports, &line_ranges, no_change)?;
         }
 
         Ok(())
@@ -41,7 +47,7 @@ impl Remover {
 
     fn get_rarely_used_lines(
         &self,
-    ) -> Result<Vec<(PathBuf, Vec<(usize, usize)>)>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<(PathBuf, Vec<(String, usize, usize)>)>, Box<dyn std::error::Error>> {
         let conn = self.config.connect_to_db()?;
         let table_name = self.config.get_table_name()?;
 
@@ -50,7 +56,7 @@ impl Remover {
     FROM \"functions\" AS f
     JOIN \"sources\" AS s ON s.id = f.source_id
     JOIN \"{}\" AS u ON f.id = u.func_id
-    WHERE u.use_function = 1
+    WHERE u.use_function = 0
     ORDER BY s.path, f.start_line",
             table_name
         );
@@ -68,6 +74,7 @@ impl Remover {
         let mut result = vec![];
         let mut source_result = vec![];
         let mut prev_src: PathBuf = PathBuf::new();
+
         for row in rows {
             if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
                 let path = PathBuf::from(path);
@@ -94,7 +101,7 @@ impl Remover {
                 }
 
                 if end_line - start_line > 1 {
-                    source_result.push((start_line, end_line - 1));
+                    source_result.push((name, start_line, end_line - 1));
                 }
             }
         }
@@ -108,7 +115,7 @@ impl Remover {
         file_path: &PathBuf,
         replacement_str: &str,
         additional_imports: &Vec<String>,
-        skip_ranges: &Vec<(usize, usize)>,
+        skip_ranges: &Vec<(String, usize, usize)>,
         no_change: bool,
     ) -> io::Result<()> {
         if skip_ranges.len() == 0 {
@@ -139,7 +146,7 @@ impl Remover {
         for (line_no, line) in reader.lines().enumerate() {
             let line_no = line_no + 1;
             let line = line?;
-            if let Some((start, end)) = skip_range {
+            if let Some((name, start, end)) = skip_range {
                 if line_no < *start || line_no > *end {
                     // Write lines not in the specified range to the temporary file
                     if no_change {
@@ -161,6 +168,7 @@ impl Remover {
                     // We reached the end of the current skip range
                     if *end <= line_no {
                         if func_body_entered {
+                            let replacement_str = replacement_str.replacen("{}", name, 1);
                             // Insert our "dummy code"
                             if no_change {
                                 println!("{}", replacement_str);
