@@ -91,11 +91,11 @@ int main(int argc, char *argv[]) {
   }
 
   std::cout << " |>> Extracting information from DB" << std::endl;
-  int no_benchs, n;
+  std::vector<int> benches;
   std::vector<int> uids;
   std::vector<int> len_c;
   std::vector<std::vector<bool>> B;
-  get_function_stats_from_db(db_file, no_benchs, n, uids, len_c, B, {});
+  get_function_stats_from_db(db_file, benches, uids, len_c, B, {});
 
   for (int i = optind; i < argc; i++) {
     auto filename = std::string(argv[i]);
@@ -103,13 +103,13 @@ int main(int argc, char *argv[]) {
               << std::endl;
     auto opt_solution = evaluate_solution_file(filename);
 
-    auto O = opt_solution["O"];
-    auto z = opt_solution["z"];
+    auto func_used = opt_solution["func_used"];
+    auto bench_used = opt_solution["bench_used"];
 
     // Total code length before optimization
     std::cout << "Total code length:" << std::endl;
     double total_length_before = 0.0;
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < uids.size(); ++i) {
       // Assuming c[i] = 1 for all functions before optimization
       total_length_before += len_c[i];
     }
@@ -117,19 +117,19 @@ int main(int argc, char *argv[]) {
 
     // Total code length after optimization
     double total_length_after = 0.0;
-    for (int i = 0; i < n; ++i) {
-      total_length_after += len_c[i] * O[i];
+    for (int i = 0; i < uids.size(); ++i) {
+      total_length_after += len_c[i] * func_used[i];
     }
     std::cout << "\tafter optimization: " << total_length_after << std::endl;
 
     // Achieved constraint calculation
     double lhs = 0.0;
     double sum_functions = 0.0;
-    for (int i = 0; i < n; ++i) {
-      sum_functions += O[i];
+    for (int i = 0; i < uids.size(); ++i) {
+      sum_functions += func_used[i];
     }
-    for (int i = 0; i < no_benchs; ++i) {
-      lhs += z[i];
+    for (int i = 0; i < benches.size(); ++i) {
+      lhs += bench_used[i];
     }
     std::cout << "No. Required Successful Benchmarks: " << lhs << std::endl;
     std::cout << "No functions in use: " << sum_functions << std::endl;

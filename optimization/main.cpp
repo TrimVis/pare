@@ -84,20 +84,18 @@ int main(int argc, char *argv[]) {
 
       std::cout << " |>> Preparing optimization" << std::endl;
 
-      // Add variables O (results in objective sum_j O[j] * len(c_j))
-      std::vector<GRBVar> O(uids.size());
+      // Add variables func_ (results in objective sum_j func[j] * len(c_j))
+      std::vector<GRBVar> func_used(uids.size());
       for (int i = 0; i < uids.size(); ++i) {
-        // FIXME: Refactor O_ to function_
-        O[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
-                            "O_" + std::to_string(uids[i]));
+        func_used[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
+                                    "func_" + std::to_string(uids[i]));
       }
 
-      // Add constraint that ensures z[i] = Prod for j in C_i (O[j])
-      std::vector<GRBVar> z(benches.size());
+      // Add constraint that ensures bench_used[i] = Prod for j in C_i (func[j])
+      std::vector<GRBVar> bench_used(benches.size());
       for (int i = 0; i < benches.size(); ++i) {
-        // FIXME: Refactor z_ to bench_
-        std::string var_name = "z_" + std::to_string(benches[i]);
-        z[i] = model.addVar(0.0, 1.0, 1.0, GRB_BINARY, var_name);
+        std::string var_name = "bench_" + std::to_string(benches[i]);
+        bench_used[i] = model.addVar(0.0, 1.0, -1.0, GRB_BINARY, var_name);
 
         std::string constr_name = var_name + "_prod_";
         GRBLinExpr sum_o = 0;
@@ -105,20 +103,22 @@ int main(int argc, char *argv[]) {
         for (int j = 0; j < uids.size(); ++j) {
           if (B[j][benches[i]]) {
             fac += 1;
-            sum_o += O[j];
+            sum_o += func_used[j];
           }
         }
 
-        model.addConstr(0 <= z[i], constr_name + "lower");
-        model.addConstr(fac * z[i] <= sum_o, constr_name + "upper");
+        // FIXME: Find a better lower bound so that:
+        // bench_used[i] == 1 iff fac == sum_o
+        model.addConstr(0 <= bench_used[i], constr_name + "lower");
+        model.addConstr(fac * bench_used[i] <= sum_o, constr_name + "upper");
       }
 
-      // Add main constraint z.sum() >= p * no_benchs
-      GRBLinExpr sum_z = 0;
+      // Add main constraint bench_used.sum() >= p * no_benchs
+      GRBLinExpr sum_bench_used = 0;
       for (int i = 0; i < benches.size(); ++i) {
-        sum_z += z[i];
+        sum_bench_used += bench_used[i];
       }
-      model.addConstr(sum_z >= p * benches.size(), "c0");
+      model.addConstr(sum_bench_used >= p * benches.size(), "c0");
 
       // // Write out the initial model
       // std::cout << " |>> Storing initial model" << std::endl;
@@ -187,8 +187,8 @@ int main(int argc, char *argv[]) {
         // Total code length after optimization
         double total_length_after = 0.0;
         for (int i = 0; i < uids.size(); ++i) {
-          double O_value = O[i].get(GRB_DoubleAttr_X);
-          total_length_after += len_c[i] * O_value;
+          double used_value = func_used[i].get(GRB_DoubleAttr_X);
+          total_length_after += len_c[i] * used_value;
         }
         std::cout << "\tafter optimization: " << total_length_after
                   << std::endl;
@@ -197,12 +197,12 @@ int main(int argc, char *argv[]) {
         double lhs = 0.0;
         double sum_functions = 0.0;
         for (int i = 0; i < uids.size(); ++i) {
-          double O_value = O[i].get(GRB_DoubleAttr_X);
-          sum_functions += O_value;
+          double used_value = func_used[i].get(GRB_DoubleAttr_X);
+          sum_functions += used_value;
         }
         for (int i = 0; i < benches.size(); ++i) {
-          double z_value = z[i].get(GRB_DoubleAttr_X);
-          lhs += z_value;
+          double used_value = bench_used[i].get(GRB_DoubleAttr_X);
+          lhs += used_value;
         }
         double rhs = p * benches.size();
         std::cout << "Achieved constraint (Required Successful Benchmarks): "
@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
 
         std::vector<bool> func_state(uids.size());
         for (int i = 0; i < uids.size(); ++i) {
-          func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
+          func_state[i] = (func_used[i].get(GRB_DoubleAttr_X) > 0.5);
         }
         // FIXME: Also store the benches which should be running
         store_used_functions_to_db(db_file, func_state, uids, p);
