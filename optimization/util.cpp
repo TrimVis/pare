@@ -144,7 +144,7 @@ void store_used_functions_to_db(std::string db_file,
   sqlite3_close(db);
 }
 
-void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
+void get_function_stats_from_db(std::string db_file, std::vector<int> &benches,
                                 std::vector<int> &uids, std::vector<int> &len_c,
                                 std::vector<std::vector<bool>> &B,
                                 std::optional<double> scaler) {
@@ -156,38 +156,17 @@ void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
   }
 
   sqlite3_stmt *stmt;
-  const char *query = "SELECT MAX(benchmark_usage_count) FROM functions";
-  // rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
-  // if (rc != SQLITE_OK) {
-  //   std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) <<
-  //   std::endl; exit(1);
-  // }
-
-  // rc = sqlite3_step(stmt);
-  // if (rc == SQLITE_ROW) {
-  //   no_benchs = sqlite3_column_int(stmt, 0);
-  //   if (scaler.has_value()) {
-  //     no_benchs = std::round(no_benchs * scaler.value());
-  //   }
-  // } else {
-  //   std::cerr << "Failed to fetch data: " << sqlite3_errmsg(db) << std::endl;
-  //   exit(1);
-  // }
-  // sqlite3_finalize(stmt);
-
-  query = "SELECT COUNT(*) FROM benchmarks";
+  const char *query =
+      "SELECT id FROM result_benchmarks WHERE exit_code = 0 ORDER BY id";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
+    sqlite3_close(db);
     exit(1);
   }
 
-  rc = sqlite3_step(stmt);
-  if (rc == SQLITE_ROW) {
-    no_benchs = sqlite3_column_int(stmt, 0);
-  } else {
-    std::cerr << "Failed to fetch data: " << sqlite3_errmsg(db) << std::endl;
-    exit(1);
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    benches.push_back(sqlite3_column_int(stmt, 0));
   }
   sqlite3_finalize(stmt);
 
@@ -216,7 +195,7 @@ void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
     int blob_size = sqlite3_column_bytes(stmt, 4);
     const uint8_t *data = static_cast<const uint8_t *>(blob_data);
 
-    std::vector<bool> Bi(no_benchs, false);
+    std::vector<bool> Bi(benches.size(), false);
     Bi.reserve(blob_size * 8);
 
     int b_count = 0;
@@ -239,8 +218,6 @@ void get_function_stats_from_db(std::string db_file, int &no_benchs, int &n,
   sqlite3_finalize(stmt);
 
   sqlite3_close(db);
-
-  n = uids.size();
 }
 
 GRBEnv *get_env_from_license(const std::string &file_path) {

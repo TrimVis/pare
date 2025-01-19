@@ -46,11 +46,11 @@ int main(int argc, char *argv[]) {
   }
 
   std::cout << " |>> Extracting values from DB" << std::endl;
-  int no_benchs, n;
+  std::vector<int> benches;
   std::vector<int> uids;
   std::vector<int> len_c;
   std::vector<std::vector<bool>> B;
-  get_function_stats_from_db(db_file, no_benchs, n, uids, len_c, B, scaler);
+  get_function_stats_from_db(db_file, benches, uids, len_c, B, scaler);
 
   long pages = sysconf(_SC_AVPHYS_PAGES);
   long page_size = sysconf(_SC_PAGE_SIZE);
@@ -85,23 +85,25 @@ int main(int argc, char *argv[]) {
       std::cout << " |>> Preparing optimization" << std::endl;
 
       // Add variables O (results in objective sum_j O[j] * len(c_j))
-      std::vector<GRBVar> O(n);
-      for (int i = 0; i < n; ++i) {
+      std::vector<GRBVar> O(uids.size());
+      for (int i = 0; i < uids.size(); ++i) {
+        // FIXME: Refactor O_ to function_
         O[i] = model.addVar(0.0, 1.0, len_c[i], GRB_BINARY,
-                            "O_" + std::to_string(i));
+                            "O_" + std::to_string(uids[i]));
       }
 
       // Add constraint that ensures z[i] = Prod for j in C_i (O[j])
-      std::vector<GRBVar> z(no_benchs);
-      for (int i = 0; i < no_benchs; ++i) {
-        std::string var_name = "z_" + std::to_string(i);
+      std::vector<GRBVar> z(benches.size());
+      for (int i = 0; i < benches.size(); ++i) {
+        // FIXME: Refactor z_ to bench_
+        std::string var_name = "z_" + std::to_string(benches[i]);
         z[i] = model.addVar(0.0, 1.0, 1.0, GRB_BINARY, var_name);
 
         std::string constr_name = var_name + "_prod_";
         GRBLinExpr sum_o = 0;
         int fac = 0;
-        for (int j = 0; j < n; ++j) {
-          if (B[j][i]) {
+        for (int j = 0; j < uids.size(); ++j) {
+          if (B[j][benches[i]]) {
             fac += 1;
             sum_o += O[j];
           }
@@ -113,17 +115,17 @@ int main(int argc, char *argv[]) {
 
       // Add main constraint z.sum() >= p * no_benchs
       GRBLinExpr sum_z = 0;
-      for (int i = 0; i < no_benchs; ++i) {
+      for (int i = 0; i < benches.size(); ++i) {
         sum_z += z[i];
       }
-      model.addConstr(sum_z >= p * no_benchs, "c0");
+      model.addConstr(sum_z >= p * benches.size(), "c0");
 
       // // Write out the initial model
       // std::cout << " |>> Storing initial model" << std::endl;
       // model.write("initial_model_" + model_name + ".lp");
 
-      // 10 hour max runtime limit
-      const double max_run_time = 60.0 * 60.0 * 10.0;
+      // 2 hour max runtime limit
+      const double max_run_time = 60.0 * 60.0 * 2.0;
 
       // Parameters for iterative solving:
       double time_limit = 1800.0; // 30 minutes per iteration
@@ -147,12 +149,6 @@ int main(int argc, char *argv[]) {
             std::cout << " |>> Feasible solution saved to checkpoint_solution_"
                       << model_name << ".sol" << std::endl;
           }
-
-          // // Write out the model as well
-          // model.write("checkpoint_model_" + model_name + ".lp");
-          // std::cout << " |>> Model written to checkpoint_model_" <<
-          // model_name
-          //           << ".lp" << std::endl;
 
           run_time += time_limit;
           // Extend time limit by 15 minutes
@@ -181,7 +177,7 @@ int main(int argc, char *argv[]) {
         // Total code length before optimization
         std::cout << "Total code length:" << std::endl;
         double total_length_before = 0.0;
-        for (int i = 0; i < n; ++i) {
+        for (int i = 0; i < uids.size(); ++i) {
           // Assuming c[i] = 1 for all functions before optimization
           total_length_before += len_c[i];
         }
@@ -190,7 +186,7 @@ int main(int argc, char *argv[]) {
 
         // Total code length after optimization
         double total_length_after = 0.0;
-        for (int i = 0; i < n; ++i) {
+        for (int i = 0; i < uids.size(); ++i) {
           double O_value = O[i].get(GRB_DoubleAttr_X);
           total_length_after += len_c[i] * O_value;
         }
@@ -200,25 +196,26 @@ int main(int argc, char *argv[]) {
         // Achieved constraint calculation
         double lhs = 0.0;
         double sum_functions = 0.0;
-        for (int i = 0; i < n; ++i) {
+        for (int i = 0; i < uids.size(); ++i) {
           double O_value = O[i].get(GRB_DoubleAttr_X);
           sum_functions += O_value;
         }
-        for (int i = 0; i < no_benchs; ++i) {
+        for (int i = 0; i < benches.size(); ++i) {
           double z_value = z[i].get(GRB_DoubleAttr_X);
           lhs += z_value;
         }
-        double rhs = p * no_benchs;
+        double rhs = p * benches.size();
         std::cout << "Achieved constraint (Required Successful Benchmarks): "
                   << lhs << " >= " << rhs << std::endl;
 
         std::cout << "No functions in use: " << sum_functions << std::endl;
         std::cout << "Objective: " << objVal << std::endl;
 
-        std::vector<bool> func_state(n);
-        for (int i = 0; i < n; ++i) {
+        std::vector<bool> func_state(uids.size());
+        for (int i = 0; i < uids.size(); ++i) {
           func_state[i] = (O[i].get(GRB_DoubleAttr_X) > 0.5);
         }
+        // FIXME: Also store the benches which should be running
         store_used_functions_to_db(db_file, func_state, uids, p);
         std::cout << " |>> Feasible solution saved to DB" << std::endl;
 
