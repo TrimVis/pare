@@ -95,7 +95,7 @@ int main(int argc, char *argv[]) {
       std::vector<GRBVar> bench_used(benches.size());
       for (int i = 0; i < benches.size(); ++i) {
         std::string var_name = "bench_" + std::to_string(benches[i]);
-        bench_used[i] = model.addVar(0.0, 1.0, -1.0, GRB_BINARY, var_name);
+        bench_used[i] = model.addVar(0.0, 1.0, 1.0, GRB_BINARY, var_name);
 
         std::string constr_name = var_name + "_prod_";
         GRBLinExpr sum_o = 0;
@@ -107,9 +107,8 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        // FIXME: Find a better lower bound so that:
-        // bench_used[i] == 1 iff fac == sum_o
-        model.addConstr(0 <= bench_used[i], constr_name + "lower");
+        model.addConstr(bench_used[i] >= sum_o - fac + 1,
+                        constr_name + "lower");
         model.addConstr(fac * bench_used[i] <= sum_o, constr_name + "upper");
       }
 
@@ -124,11 +123,11 @@ int main(int argc, char *argv[]) {
       // std::cout << " |>> Storing initial model" << std::endl;
       // model.write("initial_model_" + model_name + ".lp");
 
-      // 2 hour max runtime limit
-      const double max_run_time = 60.0 * 60.0 * 2.0;
+      // 10 hour max runtime limit
+      const double max_run_time = 60.0 * 60.0 * 10.0;
 
       // Parameters for iterative solving:
-      double time_limit = 1800.0; // 30 minutes per iteration
+      double time_limit = 3600.0; // 60 minutes per iteration
       model.set(GRB_DoubleParam_TimeLimit, time_limit);
 
       double run_time = 0.0;
@@ -151,8 +150,8 @@ int main(int argc, char *argv[]) {
           }
 
           run_time += time_limit;
-          // Extend time limit by 15 minutes
-          time_limit += 900.0;
+          // Extend time limit by 30 minutes
+          time_limit += 1800.0;
           model.set(GRB_DoubleParam_TimeLimit, time_limit);
         } else {
           if (status == GRB_OPTIMAL) {
