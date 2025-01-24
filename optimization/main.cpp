@@ -127,7 +127,7 @@ int main(int argc, char *argv[]) {
       const double max_run_time = 60.0 * 60.0 * 10.0;
 
       // Parameters for iterative solving:
-      double time_limit = 3600.0; // 60 minutes per iteration
+      double time_limit = 2.0 * 3600.0; // 2 hours per iteration
       model.set(GRB_DoubleParam_TimeLimit, time_limit);
 
       double run_time = 0.0;
@@ -150,8 +150,6 @@ int main(int argc, char *argv[]) {
           }
 
           run_time += time_limit;
-          // Extend time limit by 30 minutes
-          time_limit += 1800.0;
           model.set(GRB_DoubleParam_TimeLimit, time_limit);
         } else {
           if (status == GRB_OPTIMAL) {

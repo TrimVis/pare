@@ -103,8 +103,8 @@ int main(int argc, char *argv[]) {
               << std::endl;
     auto opt_solution = evaluate_solution_file(filename);
 
-    auto func_used = opt_solution["func_used"];
-    auto bench_used = opt_solution["bench_used"];
+    auto func_used = opt_solution["func"];
+    auto bench_used = opt_solution["bench"];
 
     // Total code length before optimization
     std::cout << "Total code length:" << std::endl;
