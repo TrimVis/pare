@@ -60,10 +60,10 @@ int main(int argc, char *argv[]) {
     std::cerr << "Error getting memory information" << std::endl;
     return 1;
   }
-  long available_mem = pages * page_size / (1024 * 1024 * 1024);
-  long node_file_mem = 0.5 * available_mem;
-  std::cout << " |>> Using Nodefile after 50% of memory is in use ("
-            << node_file_mem << "GB)" << std::endl;
+  // long available_mem = pages * page_size / (1024 * 1024 * 1024);
+  // long node_file_mem = 0.5 * available_mem;
+  // std::cout << " |>> Using Nodefile after 50% of memory is in use ("
+  //           << node_file_mem << "GB)" << std::endl;
 
   try {
     for (int i = optind; i < argc; i++) {
@@ -77,14 +77,21 @@ int main(int argc, char *argv[]) {
       GRBModel model = GRBModel(*env);
       std::string model_name = BASE_MODEL_NAME + "_p" + std::to_string(p);
       model.set(GRB_StringAttr_ModelName, model_name);
-      model.set(GRB_DoubleParam_NodefileStart, node_file_mem);
+      // model.set(GRB_DoubleParam_NodefileStart, node_file_mem);
 
-      // More threads!!
-      model.set(GRB_IntParam_Threads, 128);
+      // // More threads!!
+      // model.set(GRB_IntParam_Threads, 128);
 
       // Better logging
       model.set(GRB_IntParam_LogToConsole, 1);
       model.set(GRB_StringParam_LogFile, "gurobi.log");
+
+      // Limit the number of presolve passes
+      model.set(GRB_IntParam_PrePasses, 4);
+      // Focus on exploring more different bounds
+      model.set(GRB_IntParam_MIPFocus, 1);
+      // In case bounds are moving slowly/not at all
+      // model.set(GRB_IntParam_MIPFocus, 3);
 
       std::cout << " |>> Preparing optimization" << std::endl;
 
@@ -99,7 +106,7 @@ int main(int argc, char *argv[]) {
       std::vector<GRBVar> bench_used(benches.size());
       for (int i = 0; i < benches.size(); ++i) {
         std::string var_name = "bench_" + std::to_string(benches[i]);
-        bench_used[i] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, var_name);
+        bench_used[i] = model.addVar(0.0, 1.0, 0.01, GRB_BINARY, var_name);
 
         std::string constr_name = var_name + "_prod_";
         GRBLinExpr sum_o = 0;
@@ -111,9 +118,12 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        model.addConstr(bench_used[i] >= sum_o - fac + 1,
-                        constr_name + "lower");
-        model.addConstr(fac * bench_used[i] <= sum_o, constr_name + "upper");
+        // Only add bounds in case the the benchmark is needed
+        if (fac > 0) {
+          model.addConstr(bench_used[i] >= sum_o - fac + 1,
+                          constr_name + "lower");
+          model.addConstr(fac * bench_used[i] <= sum_o, constr_name + "upper");
+        }
       }
 
       // Add main constraint bench_used.sum() >= p * no_benchs
@@ -127,9 +137,9 @@ int main(int argc, char *argv[]) {
       // std::cout << " |>> Storing initial model" << std::endl;
       // model.write("initial_model_" + model_name + ".lp");
 
-      // Parameters for iterative solving:
-      double time_limit = 10.0 * 3600.0; // 10 hours per iteration
-      model.set(GRB_DoubleParam_TimeLimit, time_limit);
+      // // Parameters for iterative solving:
+      // double time_limit = 10.0 * 3600.0; // 10 hours per iteration
+      // model.set(GRB_DoubleParam_TimeLimit, time_limit);
 
       for (int runs = 0; runs < MAX_RUNS; runs++) {
         std::cout << " |>> Running optimization step" << std::endl;
@@ -166,56 +176,60 @@ int main(int argc, char *argv[]) {
       }
 
       std::cout << std::endl << " |>> Optimization concluded" << std::endl;
-      double objVal = model.get(GRB_DoubleAttr_ObjVal);
-      if (objVal < GRB_INFINITY) {
-        // Total code length before optimization
-        std::cout << "Total code length:" << std::endl;
-        double total_length_before = 0.0;
-        for (int i = 0; i < uids.size(); ++i) {
-          // Assuming c[i] = 1 for all functions before optimization
-          total_length_before += len_c[i];
-        }
-        std::cout << "\tbefore optimization: " << total_length_before
-                  << std::endl;
+      int status = model.get(GRB_IntAttr_Status);
+      if (status != GRB_INFEASIBLE || status != GRB_INF_OR_UNBD) {
 
-        // Total code length after optimization
-        double total_length_after = 0.0;
-        for (int i = 0; i < uids.size(); ++i) {
-          double used_value = func_used[i].get(GRB_DoubleAttr_X);
-          total_length_after += len_c[i] * used_value;
-        }
-        std::cout << "\tafter optimization: " << total_length_after
-                  << std::endl;
+        double objVal = model.get(GRB_DoubleAttr_ObjVal);
+        if (objVal < GRB_INFINITY) {
+          // Total code length before optimization
+          std::cout << "Total code length:" << std::endl;
+          double total_length_before = 0.0;
+          for (int i = 0; i < uids.size(); ++i) {
+            // Assuming c[i] = 1 for all functions before optimization
+            total_length_before += len_c[i];
+          }
+          std::cout << "\tbefore optimization: " << total_length_before
+                    << std::endl;
 
-        // Achieved constraint calculation
-        double lhs = 0.0;
-        double sum_functions = 0.0;
-        for (int i = 0; i < uids.size(); ++i) {
-          double used_value = func_used[i].get(GRB_DoubleAttr_X);
-          sum_functions += used_value;
-        }
-        for (int i = 0; i < benches.size(); ++i) {
-          double used_value = bench_used[i].get(GRB_DoubleAttr_X);
-          lhs += used_value;
-        }
-        double rhs = p * benches.size();
-        std::cout << "Achieved constraint (Required Successful Benchmarks): "
-                  << lhs << " >= " << rhs << std::endl;
+          // Total code length after optimization
+          double total_length_after = 0.0;
+          for (int i = 0; i < uids.size(); ++i) {
+            double used_value = func_used[i].get(GRB_DoubleAttr_X);
+            total_length_after += len_c[i] * used_value;
+          }
+          std::cout << "\tafter optimization: " << total_length_after
+                    << std::endl;
 
-        std::cout << "No functions in use: " << sum_functions << std::endl;
-        std::cout << "Objective: " << objVal << std::endl;
+          // Achieved constraint calculation
+          double lhs = 0.0;
+          double sum_functions = 0.0;
+          for (int i = 0; i < uids.size(); ++i) {
+            double used_value = func_used[i].get(GRB_DoubleAttr_X);
+            sum_functions += used_value;
+          }
+          for (int i = 0; i < benches.size(); ++i) {
+            double used_value = bench_used[i].get(GRB_DoubleAttr_X);
+            lhs += used_value;
+          }
+          double rhs = p * benches.size();
+          std::cout << "Achieved constraint (Required Successful Benchmarks): "
+                    << lhs << " >= " << rhs << std::endl;
 
-        std::vector<bool> func_state(uids.size());
-        for (int i = 0; i < uids.size(); ++i) {
-          func_state[i] = (func_used[i].get(GRB_DoubleAttr_X) > 0.5);
+          std::cout << "No functions in use: " << sum_functions << std::endl;
+          std::cout << "Objective: " << objVal << std::endl;
+
+          std::vector<bool> func_state(uids.size());
+          for (int i = 0; i < uids.size(); ++i) {
+            func_state[i] = (func_used[i].get(GRB_DoubleAttr_X) > 0.5);
+          }
+          // FIXME: Also store the benches which should be running
+          store_used_functions_to_db(db_file, func_state, uids, p);
+          std::cout << " |>> Feasible solution saved to DB" << std::endl;
+
+          model.write("solution_" + model_name + ".sol");
+          std::cout << " |>> Feasible solution saved to solution_" << model_name
+                    << ".sol" << std::endl;
         }
-        // FIXME: Also store the benches which should be running
-        store_used_functions_to_db(db_file, func_state, uids, p);
-        std::cout << " |>> Feasible solution saved to DB" << std::endl;
-
-        model.write("solution_" + model_name + ".sol");
-        std::cout << " |>> Feasible solution saved to solution_" << model_name
-                  << ".sol" << std::endl;
       }
 
       // Write out the model as well
