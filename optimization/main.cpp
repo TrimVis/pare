@@ -97,35 +97,23 @@ int main(int argc, char *argv[]) {
 
       // Add constraint that ensures bench_used[i] = Prod for j in C_i (func[j])
       std::vector<GRBVar> bench_used(benches.size());
-      std::vector<GRBGenConstr> bench_constr(benches.size());
-      std::vector<std::vector<GRBVar>> func_refs(benches.size());
       for (int i = 0; i < benches.size(); ++i) {
         std::string var_name = "bench_" + std::to_string(benches[i]);
         bench_used[i] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, var_name);
 
-        // std::string constr_name = var_name + "_prod_";
+        std::string constr_name = var_name + "_prod_";
         GRBLinExpr sum_o = 0;
         int fac = 0;
-        std::vector<GRBVar> funcs;
         for (int j = 0; j < uids.size(); ++j) {
           if (B[j][benches[i]]) {
-            // fac += 1;
-            // sum_o += func_used[j];
-            funcs.push_back(func_used[j]);
+            fac += 1;
+            sum_o += func_used[j];
           }
         }
 
-        // Keep a reference to funcs somewhere so the compiler doesn't call the
-        // destructor
-        func_refs.push_back(funcs);
-        auto constraint =
-            model.addGenConstrAnd(bench_used[i], &(func_refs[i][0]),
-                                  funcs.size(), var_name + "_prod");
-        bench_constr.push_back(constraint);
-
-        // model.addConstr(bench_used[i] >= sum_o - fac + 1,
-        //                 constr_name + "lower");
-        // model.addConstr(fac * bench_used[i] <= sum_o, constr_name + "upper");
+        model.addConstr(bench_used[i] >= sum_o - fac + 1,
+                        constr_name + "lower");
+        model.addConstr(fac * bench_used[i] <= sum_o, constr_name + "upper");
       }
 
       // Add main constraint bench_used.sum() >= p * no_benchs
