@@ -144,9 +144,11 @@ void store_used_functions_to_db(std::string db_file,
   sqlite3_close(db);
 }
 
-void get_function_stats_from_db(std::string db_file, std::vector<int> &benches,
-                                std::vector<int> &uids, std::vector<int> &len_c,
-                                std::vector<std::vector<bool>> &B,
+void get_function_stats_from_db(std::string db_file,
+                                std::vector<int> &bench_ids,
+                                std::vector<int> &func_ids,
+                                std::vector<int> &func_lens,
+                                std::vector<std::vector<bool>> &func_usages,
                                 std::optional<double> scaler) {
   sqlite3 *db;
   int rc = sqlite3_open(db_file.c_str(), &db);
@@ -166,7 +168,7 @@ void get_function_stats_from_db(std::string db_file, std::vector<int> &benches,
   }
 
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    benches.push_back(sqlite3_column_int(stmt, 0));
+    bench_ids.push_back(sqlite3_column_int(stmt, 0));
   }
   sqlite3_finalize(stmt);
 
@@ -182,38 +184,34 @@ void get_function_stats_from_db(std::string db_file, std::vector<int> &benches,
   }
 
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-    int uid = sqlite3_column_int(stmt, 0);
-    int bcount = sqlite3_column_int(stmt, 1);
-    int start = sqlite3_column_int(stmt, 2);
-    int end = sqlite3_column_int(stmt, 3);
-
-    uids.push_back(uid);
-    len_c.push_back(end - start + 1);
+    int func_id = sqlite3_column_int(stmt, 0);
+    // int usage_count = sqlite3_column_int(stmt, 1);
+    int start_line = sqlite3_column_int(stmt, 2);
+    int end_line = sqlite3_column_int(stmt, 3);
 
     // Read the BLOB data
-    const void *blob_data = sqlite3_column_blob(stmt, 4);
+    const void *usage_blob = sqlite3_column_blob(stmt, 4);
     int blob_size = sqlite3_column_bytes(stmt, 4);
-    const uint8_t *data = static_cast<const uint8_t *>(blob_data);
+    const uint8_t *func_usage_data = static_cast<const uint8_t *>(usage_blob);
 
-    std::vector<bool> Bi(benches.size(), false);
-    Bi.reserve(blob_size * 8);
+    std::vector<bool> func_usage(bench_ids.size(), false);
 
-    int b_count = 0;
-    for (int i = 0; i < blob_size; ++i) {
-      for (uint8_t bit = 0; bit < 8; ++bit) {
-        Bi[8 * i + (7 - bit)] = (data[i] >> bit) & 1;
-        b_count += Bi[8 * i + bit];
-      }
+    int usage_count = 0;
+    for (int i = 0; i < bench_ids.size(); i++) {
+      uint64_t byte = (bench_ids[i] - 1) / 8;
+      uint64_t bit_offset = 7 - ((bench_ids[i] - 1) % 8);
+      func_usage[i] = (func_usage_data[byte] >> bit_offset) & 1;
+      usage_count += func_usage[i];
     }
-    // std::cout << "Expected: " << bcount << " but extracted " << b_count
-    //           << std::endl;
-    // // assert((void("Counts do not match!!!"), bcount == b_count));
 
-    // for (int i = 0; i < 16; i++) {
-    //   std::cout << " " << Bi[i];
-    // }
-    // std::cout << std::endl;
-    B.push_back(Bi);
+    // Ignore functions that are unused or required by all benchmarks
+    if (usage_count == 0 || usage_count == bench_ids.size()) {
+      continue;
+    }
+
+    func_ids.push_back(func_id);
+    func_lens.push_back(end_line - start_line + 1);
+    func_usages.push_back(func_usage);
   }
   sqlite3_finalize(stmt);
 
