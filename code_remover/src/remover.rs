@@ -112,8 +112,23 @@ impl Remover {
                 let reader = BufReader::new(input_file?);
                 let mut bracket_counter: i64 = 0;
                 let mut entered_body: bool = false;
-                for (line_no, line) in reader.lines().enumerate().skip(start_line) {
+                let mut in_comment: bool = false;
+                for (line_no, line) in reader.lines().enumerate().skip(start_line - 1) {
                     let line = line?;
+
+                    // Skip comments
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    } else if line.trim_start().starts_with("/*") {
+                        in_comment = true;
+                    }
+                    if in_comment {
+                        if line.contains("*/") {
+                            in_comment = false;
+                        }
+                        continue;
+                    }
+
                     let open_count = line.chars().filter(|&c| c == '{').count();
                     let close_count = line.chars().filter(|&c| c == '}').count();
 
