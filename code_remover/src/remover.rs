@@ -50,6 +50,7 @@ impl Remover {
     ) -> Result<Vec<(PathBuf, Vec<(String, usize, usize)>)>, Box<dyn std::error::Error>> {
         let conn = self.config.connect_to_db()?;
         let table_name = self.config.get_table_name()?;
+        println!("Table name: {}", table_name);
 
         let stmt = format!(
             "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
@@ -75,14 +76,21 @@ impl Remover {
         let mut source_result = vec![];
         let mut prev_src: PathBuf = PathBuf::new();
 
+        let mut count = 0;
+        let mut total_count = 0;
+
         for row in rows {
             if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
+                let (exp_start_line, exp_end_line) = (start_line, end_line);
+
+                total_count += 1;
                 let mut end_line = end_line;
                 let path = PathBuf::from(path);
                 if self
                     .config
                     .ignore_path(&path, &name, &start_line, &end_line)
                 {
+                    println!("Ignoring file due to rules with original path!");
                     continue;
                 }
                 let prev_path = path.clone();
@@ -92,39 +100,75 @@ impl Remover {
                         .config
                         .ignore_path(&path, &name, &start_line, &end_line)
                 {
+                    println!("Ignoring file due to rules with rewritten path!");
                     continue;
                 }
 
                 let input_file = File::open(path.clone());
                 if input_file.is_err() {
+                    println!("Couldn't open source code file!");
                     continue;
                 }
                 let reader = BufReader::new(input_file?);
                 let mut bracket_counter: i64 = 0;
-                for (line_no, line) in reader.lines().enumerate().skip(start_line - 1) {
+                let mut entered_body: bool = false;
+                for (line_no, line) in reader.lines().enumerate().skip(start_line) {
                     let line = line?;
                     let open_count = line.chars().filter(|&c| c == '{').count();
                     let close_count = line.chars().filter(|&c| c == '}').count();
-                    bracket_counter += (open_count as i64) - (close_count as i64);
-                    if bracket_counter <= 0 {
-                        end_line = line_no;
-                        break;
+
+                    // Only start counting the brackets once we have entered the body
+                    if !entered_body {
+                        entered_body = open_count > 0;
+                    }
+                    if entered_body {
+                        bracket_counter += (open_count as i64) - (close_count as i64);
+                        if bracket_counter <= 0 {
+                            end_line = line_no;
+                            break;
+                        }
                     }
                 }
 
                 if prev_src != path {
-                    result.push((prev_src, source_result));
+                    if source_result.len() > 0 {
+                        result.push((prev_src, source_result));
+                    }
                     source_result = vec![];
-                    prev_src = path;
+                    prev_src = path.clone();
                 }
 
-                if end_line as i64 - start_line as i64 > 2 {
+                let line_diff = end_line as i64 - start_line as i64;
+                if line_diff > 2 {
                     source_result.push((name, start_line, end_line));
+                } else {
+                    let exp_line_diff = exp_end_line as i64 - exp_start_line as i64;
+                    println!(
+                        "Ignoring function '{}' due to small line change (file: {})",
+                        name,
+                        path.display().to_string()
+                    );
+                    println!(
+                        "Expected start line: {}; Expected end line: {}",
+                        exp_start_line, exp_end_line,
+                    );
+                    println!(
+                        "Found start line: {}; Found end line: {}",
+                        start_line, end_line,
+                    );
+                    println!(
+                        "Expected diff: {}; Calculated diff: {}",
+                        exp_line_diff, line_diff
+                    );
                 }
+
+                count += 1;
             }
         }
         // The first entry is always empty
         result.remove(0);
+
+        println!("Removed: {}/{}", count, total_count);
         Ok(result)
     }
 

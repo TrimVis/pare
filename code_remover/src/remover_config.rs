@@ -70,6 +70,7 @@ impl Config {
     }
 
     pub fn connect_to_db(&self) -> Result<Connection, Box<dyn std::error::Error>> {
+        println!("db path: {}", self.db.display().to_string());
         let conn = Connection::open_with_flags(&self.db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Ok(conn)
     }

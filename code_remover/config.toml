@@ -1,5 +1,5 @@
-db = "../reports/report_solved.sqlite"
-p = 0.97
+db = "../reports/report_solved4.sqlite"
+p = 0.90
 
 [replace_path_prefix]
 "/local/home/jordanpa/" = "../../"
