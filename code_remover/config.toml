@@ -1,6 +1,8 @@
 db = "../reports/report_solved4.sqlite"
 p = 0.90
 
+placeholder = "std::cout << \"Unsupported feature\" << std::endl; exit(1000); __builtin_unreachable();"
+
 [replace_path_prefix]
 "/local/home/jordanpa/" = "../../"
 

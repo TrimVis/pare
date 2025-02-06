@@ -34,11 +34,8 @@ impl Remover {
             // );
             // println!("Lines to be replaced: {:?}", line_ranges);
 
-            let imports = vec!["#include <iostream>".to_string()];
-            let replacement = format!(
-                "std::cout << \"Unsupported feature '{}': '{{}}'\" << std::endl; exit(1000); __builtin_unreachable();", 
-                file.display().to_string()
-            );
+            let imports = self.config.get_imports();
+            let replacement = self.config.get_placeholder();
             self.replace_lines_in_file(&file, &replacement, &imports, &line_ranges, no_change)?;
         }
 
@@ -250,7 +247,10 @@ impl Remover {
                     // We reached the end of the current skip range
                     if *end <= line_no {
                         if func_body_entered {
-                            let replacement_str = replacement_str.replacen("{}", name, 1);
+                            // Replace placeholders
+                            let replacement_str = replacement_str
+                                .replace("{func_name}", name)
+                                .replace("{file_name}", &file_path.display().to_string());
                             // Insert our "dummy code"
                             if no_change {
                                 println!("{}", replacement_str);

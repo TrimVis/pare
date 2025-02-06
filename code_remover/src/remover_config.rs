@@ -47,6 +47,11 @@ pub struct Config {
     pub p: f64,
 
     #[serde(default)]
+    pub imports: Option<Vec<String>>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+
+    #[serde(default)]
     pub replace_path_prefix: Option<HashMap<String, String>>,
 
     #[serde(default)]
@@ -73,6 +78,17 @@ impl Config {
         println!("db path: {}", self.db.display().to_string());
         let conn = Connection::open_with_flags(&self.db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Ok(conn)
+    }
+
+    pub fn get_imports(&self) -> Vec<String> {
+        self.imports
+            .clone()
+            .unwrap_or(vec!["#include <iostream>".to_string()])
+    }
+    pub fn get_placeholder(&self) -> String {
+        self.placeholder.clone().unwrap_or(
+             "std::cout << \"Unsupported feature '{file_name}': '{func_name}'\" << std::endl; exit(1000); __builtin_unreachable();".to_string()
+            )
     }
 
     pub fn ignore_path_prefix(&self, path: &PathBuf) -> bool {
