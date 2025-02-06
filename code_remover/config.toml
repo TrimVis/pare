@@ -11,6 +11,10 @@ path_prefix = [
   "/local/home/jordanpa/cvc5-repo/build/"
 ]
 
+# TODO: Investigate where the consistent offset comes from
+[path."/local/home/jordanpa/cvc5-repo/src/theory/theory_engine.cpp"]
+ignore = {this = true}
+
 [path."/local/home/jordanpa/cvc5-repo/src/api/cpp/cvc5.cpp"]
 line_ranges = [ 
  [7743, 7839]

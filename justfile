@@ -45,7 +45,7 @@ bench-optimize-eval +SOL_FILES: build-optimize-eval
         
 # Remove rarely used code segments
 bench-remover: build-remover
-    ./code_remover/target/release/code_remover 
+    ./code_remover/target/release/code_remover remove --config ./code_remover/config.toml --no-change false
     @echo "Removed all rarely used functions from code base"
 
 download-bench:

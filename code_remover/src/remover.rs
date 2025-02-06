@@ -28,11 +28,11 @@ impl Remover {
             //     continue;
             // }
 
-            println!(
-                "\n\nReplacing lines in file: {}",
-                file.display().to_string()
-            );
-            println!("Lines to be replaced: {:?}", line_ranges);
+            // println!(
+            //     "\n\nReplacing lines in file: {}",
+            //     file.display().to_string()
+            // );
+            // println!("Lines to be replaced: {:?}", line_ranges);
 
             let imports = vec!["#include <iostream>".to_string()];
             let replacement = format!(
@@ -115,6 +115,11 @@ impl Remover {
                 let mut in_comment: bool = false;
                 for (line_no, line) in reader.lines().enumerate().skip(start_line - 1) {
                     let line = line?;
+                    // TODO: Somehow check the function signature for correctness of the function
+                    // body
+                    // if line_no == start_line {
+                    //     println!("Func: {}\nStartline: {}", name, line);
+                    // }
 
                     // Skip comments
                     if line.trim_start().starts_with("//") {
