@@ -144,6 +144,39 @@ void store_used_functions_to_db(std::string db_file,
   sqlite3_close(db);
 }
 
+std::vector<std::string> get_bench_stats_from_db(std::string db_file) {
+  std::vector<std::string> bench_names;
+  sqlite3 *db;
+  int rc = sqlite3_open(db_file.c_str(), &db);
+  if (rc) {
+    std::cerr << "Can't open database: " << sqlite3_errmsg(db) << std::endl;
+    exit(1);
+  }
+
+  sqlite3_stmt *stmt;
+  const char *query = "SELECT id, path FROM benchmarks ORDER BY id";
+  rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
+    sqlite3_close(db);
+    exit(1);
+  }
+
+  bench_names.push_back("");
+  for (int i = 1; (rc = sqlite3_step(stmt)) == SQLITE_ROW; i++) {
+    int id = sqlite3_column_int(stmt, 0);
+    assert(id == i && "Out of order bench id!");
+    std::string path =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+    bench_names.push_back(path);
+  }
+  sqlite3_finalize(stmt);
+
+  sqlite3_close(db);
+
+  return bench_names;
+}
+
 void get_function_stats_from_db(std::string db_file,
                                 std::vector<int> &bench_ids,
                                 std::vector<int> &func_ids,

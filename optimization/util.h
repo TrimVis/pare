@@ -10,4 +10,6 @@ void get_function_stats_from_db(std::string db_file, std::vector<int> &benches,
                                 std::vector<std::vector<bool>> &B,
                                 std::optional<double> scaler);
 
+std::vector<std::string> get_bench_stats_from_db(std::string db_file);
+
 GRBEnv *get_env_from_license(const std::string &file_path);

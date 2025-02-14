@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 std::map<std::string, std::vector<double>>
@@ -91,11 +92,12 @@ int main(int argc, char *argv[]) {
   }
 
   std::cout << " |>> Extracting information from DB" << std::endl;
-  std::vector<int> benches;
-  std::vector<int> uids;
-  std::vector<int> len_c;
-  std::vector<std::vector<bool>> B;
-  get_function_stats_from_db(db_file, benches, uids, len_c, B, {});
+  std::vector<int> bench_ids;
+  std::vector<int> func_ids;
+  std::vector<int> func_lens;
+  std::vector<std::vector<bool>> func_usages;
+  get_function_stats_from_db(db_file, bench_ids, func_ids, func_lens,
+                             func_usages, {});
 
   for (int i = optind; i < argc; i++) {
     auto filename = std::string(argv[i]);
@@ -109,30 +111,83 @@ int main(int argc, char *argv[]) {
     // Total code length before optimization
     std::cout << "Total code length:" << std::endl;
     double total_length_before = 0.0;
-    for (int i = 0; i < uids.size(); ++i) {
+    for (int i = 0; i < func_ids.size(); ++i) {
       // Assuming c[i] = 1 for all functions before optimization
-      total_length_before += len_c[i];
+      total_length_before += func_lens[i];
     }
     std::cout << "\tbefore optimization: " << total_length_before << std::endl;
 
     // Total code length after optimization
     double total_length_after = 0.0;
-    for (int i = 0; i < uids.size(); ++i) {
-      total_length_after += len_c[i] * func_used[i];
+    for (int i = 0; i < func_ids.size(); ++i) {
+      total_length_after += func_lens[i] * func_used[i];
     }
     std::cout << "\tafter optimization: " << total_length_after << std::endl;
 
     // Achieved constraint calculation
     double lhs = 0.0;
     double sum_functions = 0.0;
-    for (int i = 0; i < uids.size(); ++i) {
+    for (int i = 0; i < func_ids.size(); ++i) {
       sum_functions += func_used[i];
     }
-    for (int i = 0; i < benches.size(); ++i) {
+    for (int i = 0; i < bench_ids.size(); ++i) {
       lhs += bench_used[i];
     }
-    std::cout << "No. Required Successful Benchmarks: " << lhs << std::endl;
     std::cout << "No functions in use: " << sum_functions << std::endl;
+    std::cout << "No working benchmarks: " << lhs << std::endl;
+
+    std::cout << std::endl
+              << "Overview of working benchmarks per theory:" << std::endl;
+
+    std::vector<std::string> bench_names = get_bench_stats_from_db(db_file);
+    std::map<std::string, std::tuple<int, int>> rel_theory_working;
+    for (int j = 0; j < bench_ids.size(); j++) {
+      int bench_id = bench_ids[j];
+      std::string path = bench_names[bench_id];
+
+      // Extract the theory name
+      std::string marker = "/non-incremental/";
+      size_t pos = path.find(marker);
+      if (pos == std::string::npos) {
+        assert("Found invalid path string");
+        continue;
+      }
+      pos += marker.size();
+      size_t endPos = path.find('/', pos);
+      std::string theory = (endPos != std::string::npos)
+                               ? path.substr(pos, endPos - pos)
+                               : path.substr(pos);
+
+      // Update the map entry
+      int working = bench_used[j];
+      int total = 1;
+      if (auto elem = rel_theory_working.find(theory);
+          elem != rel_theory_working.end()) {
+        working += std::get<0>(elem->second);
+        total += std::get<1>(elem->second);
+      }
+
+      rel_theory_working[theory] = {working, total};
+    }
+
+    int count = 1;
+    for (auto theory_elem : rel_theory_working) {
+      std::string theory_name = theory_elem.first + ":";
+      theory_name.resize(15, ' ');
+      int percentage = 100.0 * (double)std::get<0>(theory_elem.second) /
+                       (double)std::get<1>(theory_elem.second);
+      std::cout << theory_name << percentage << "%\t";
+      if (count % 5 == 0) {
+        std::cout << std::endl;
+      }
+      count++;
+    }
+    std::cout << std::endl;
+
+    // Some line breaks so we have clearer borders
+    if (i < argc - 1) {
+      std::cout << std::endl << std::string("-", 30) << std::endl << std::endl;
+    }
   }
 
   return 0;
