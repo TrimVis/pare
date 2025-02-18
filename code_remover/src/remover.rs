@@ -7,8 +7,18 @@ use std::path::PathBuf;
 
 use crate::remover_config::Config;
 
+const DEBUG: bool = false;
+
 pub struct Remover {
     config: Config,
+}
+
+struct FunctionRange {
+    name: String,
+    start_line: usize,
+    start_col: usize,
+    end_line: usize,
+    end_col: usize,
 }
 
 impl Remover {
@@ -26,10 +36,6 @@ impl Remover {
         let rarely_used = self.get_rarely_used_lines()?;
 
         for (file, line_ranges) in rarely_used {
-            // if !file.ends_with("sat_solver_types.h") {
-            //     continue;
-            // }
-
             // println!(
             //     "\n\nReplacing lines in file: {}",
             //     file.display().to_string()
@@ -46,10 +52,10 @@ impl Remover {
 
     fn get_rarely_used_lines(
         &self,
-    ) -> Result<Vec<(PathBuf, Vec<(String, usize, usize)>)>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<(PathBuf, Vec<FunctionRange>)>, Box<dyn std::error::Error>> {
         let conn = self.config.connect_to_db()?;
         let table_name = self.config.get_table_name()?;
-        println!("Table name: {}", table_name);
+        println!("[INFO] Table name: {}", table_name);
 
         let stmt = format!(
             "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
@@ -71,14 +77,6 @@ impl Remover {
 
             Ok((path, name, start_line, start_col, end_line, end_col))
         })?;
-
-        struct FunctionRange {
-            name: String,
-            start_line: usize,
-            start_col: usize,
-            end_line: usize,
-            end_col: usize,
-        }
 
         // Keep track of some statistics
         let mut total_func_count = 0;
@@ -122,10 +120,12 @@ impl Remover {
         let mut result = vec![];
 
         for (path, functions) in file_map.iter() {
-            // if !path.ends_with("src/theory/theory_engine.cpp") {
+            // if !path.ends_with("src/theory/arrays/theory_arrays_rewriter.cpp") {
             //     continue;
             // }
-
+            // if !path.ends_with("src/theory/strings/solver_state.cpp") {
+            //     continue;
+            // }
             let path = path.clone();
             let original_path = path.clone();
             let path = self.config.replace_path_prefix(path);
@@ -133,13 +133,13 @@ impl Remover {
             if self.config.ignore_path_prefix(&original_path)
                 || self.config.ignore_path_prefix(&path)
             {
-                println!("Ignoring file due to rules with path!");
+                println!("[IGNORE] Ignoring file due to path rule!");
                 continue;
             }
 
             let input_file = File::open(path.clone());
             if input_file.is_err() {
-                println!("Couldn't open source code file!");
+                println!("[ERROR] Couldn't open source code file!");
                 continue;
             }
             let reader = BufReader::new(input_file?);
@@ -163,7 +163,9 @@ impl Remover {
             let mut func_depth: i64 = 0;
             let mut func_name: Option<String> = None;
             let mut func_start: usize = 0;
+            let mut func_start_col: usize = 0;
             let mut func_end: usize;
+            let mut func_end_col: usize;
 
             // Regex used to extract the function name.
             // A function name can only contain alphanumeric characters and underscores
@@ -198,22 +200,24 @@ impl Remover {
                     namespace_prefix.push((depth, namespace.trim().to_string()));
                 }
 
-                // FIXME: Make this debug statements
-                // println!(
-                //     "{} ({}) [Brackets: {} - {}] {{{}, {}; {}}}: {}",
-                //     if !is_inline && !was_inline {
-                //         "      "
-                //     } else {
-                //         "Inline"
-                //     },
-                //     line_no,
-                //     depth,
-                //     func_depth,
-                //     entered_body,
-                //     body_chance,
-                //     func_start_offset,
-                //     line
-                // );
+                if DEBUG {
+                    println!(
+                        "{} ({}) [Brackets: {} - {}] {{func: {}, fc: {}, il: {}; {}}}: {}",
+                        if !is_inline && !was_inline {
+                            "      "
+                        } else {
+                            "Inline"
+                        },
+                        line_no,
+                        depth,
+                        func_depth,
+                        entered_body,
+                        body_chance,
+                        in_init_list,
+                        func_start_offset,
+                        line
+                    );
+                }
 
                 // Skip comments, as we do not want to count them
                 if line.trim_start().starts_with("//") {
@@ -238,7 +242,10 @@ impl Remover {
                 let close_count = line.chars().filter(|&c| c == '}').count();
 
                 depth += (open_count as i64) - (close_count as i64);
-                func_depth += (open_count as i64) - (close_count as i64);
+                if entered_body {
+                    func_depth += (open_count as i64) - (close_count as i64);
+                }
+
                 namespace_prefix = namespace_prefix
                     .into_iter()
                     .filter(|(d, _)| d <= &depth)
@@ -247,31 +254,38 @@ impl Remover {
                 // Only start counting the brackets once we have entered the body
                 entered_body = entered_body && func_depth > 0;
                 if !entered_body {
-                    let chars = ['{', '}', ';', '(', ')'];
-                    entered_body = line.chars().any(|c| chars.contains(&c))
-                        && {
-                            let str: String = line.chars().filter(|c| chars.contains(c)).collect();
-                            let res = (body_chance && str == "{") || str == "(){";
-                            if !in_init_list {
-                                body_chance = str == "()"
-                                    || (str == "(" && line.trim_end().ends_with(","))
-                                    || (body_chance && str == ")");
-                            }
-                            res
-                        }
-                        && open_count > 0;
+                    let chars = ['{', '}', '(', ')'];
                     if !in_init_list {
                         in_init_list = !entered_body && body_chance && line.contains(": ");
                         if !in_init_list {
                             if let Some(capture) = func_name_regex.captures(line.as_str()) {
+                                // println!("{:?}", capture);
                                 func_name = Some(capture[1].to_string());
                             }
                         }
                     }
+                    entered_body = line.chars().any(|c| chars.contains(&c)) && {
+                        let str: String = line.chars().filter(|c| chars.contains(c)).collect();
+                        let res = (body_chance && str == "{") || str == "(){";
+                        if !in_init_list {
+                            body_chance = str == "()"
+                                || str == "("
+                                || str == ")"
+                                || (body_chance && line.trim_end().ends_with(","))
+                                || (body_chance && str == ")");
+                        }
+                        res || (open_count > 0
+                            && line
+                                .chars()
+                                .filter(|c| ['{', '}'].contains(c))
+                                .collect::<String>()
+                                .ends_with("{}"))
+                    };
                     if entered_body {
                         in_init_list = false;
                         body_chance = false;
                         func_start = line_no;
+                        func_start_col = line.find("{").unwrap();
                         func_depth = (open_count as i64) - (close_count as i64);
                     }
                 }
@@ -280,13 +294,16 @@ impl Remover {
                 // function!
                 if !is_inline && entered_body != prev_entered_body && func_depth <= 0 {
                     func_end = line_no;
-                    // println!(
-                    //     "Found function '{}' from line {} ({}) to line {}",
-                    //     func_name.clone().unwrap_or("N/A".to_string()),
-                    //     func_start,
-                    //     func_start - func_start_offset,
-                    //     func_end
-                    // );
+                    func_end_col = line.rfind("}").unwrap_or(line.len());
+                    if DEBUG {
+                        println!(
+                            "Found function '{}' from line {} ({}) to line {}",
+                            func_name.clone().unwrap_or("N/A".to_string()),
+                            func_start,
+                            func_start - func_start_offset,
+                            func_end
+                        );
+                    }
 
                     if func_name.is_some() {
                         let mut real_func_name: String = String::new();
@@ -296,13 +313,23 @@ impl Remover {
                         real_func_name.push_str(func_name.unwrap().clone().as_str());
                         funcs_by_name.insert(
                             real_func_name.clone(),
-                            (line_offset + func_start, line_offset + func_end),
+                            (
+                                line_offset + func_start,
+                                line_offset + func_end,
+                                func_start_col,
+                                func_end_col,
+                            ),
                         );
                         // println!("Detected Function Name: {}", real_func_name);
                     }
                     funcs_by_lines.insert(
                         (func_start - func_start_offset, func_end),
-                        (line_offset + func_start, line_offset + func_end),
+                        (
+                            line_offset + func_start,
+                            line_offset + func_end,
+                            func_start_col,
+                            func_end_col,
+                        ),
                     );
 
                     func_name = None;
@@ -332,12 +359,14 @@ impl Remover {
                     )
                 };
                 if ignore_func(&original_path) || ignore_func(&path) {
-                    println!("Ignoring function in file due to rules set for this path!");
+                    println!("[IGNORE]\tIgnoring function due to path rules!");
                     continue;
                 }
 
-                let mut start_line = 0;
-                let mut end_line = 0;
+                let start_line;
+                let start_col;
+                let end_line;
+                let end_col;
 
                 // FIXME: Name detection is somewhat broken, due to sometimes the signature being
                 // reported by gcov being wrong...
@@ -346,53 +375,74 @@ impl Remover {
                 let temp_name = function.name.split_once("(").unwrap().0;
                 // println!("Checking for function {}!", temp_name);
                 // println!("Keys: {:?}", funcs_by_name.keys());
-                if let Some(&(start, end)) = funcs_by_name.get(temp_name) {
+                if let Some(&(start, end, start_c, end_c)) = funcs_by_name.get(temp_name) {
                     // println!("Found function {} by name!", function.name);
                     start_line = start;
+                    start_col = start_c;
                     end_line = end;
-                }
+                    end_col = end_c;
+                } else
                 // Detected function start and end by 'gcov lines'
-                if let Some(&(start, end)) =
+                if let Some(&(start, end, start_c, end_c)) =
                     funcs_by_lines.get(&(function.start_line, function.end_line))
                 {
                     // println!("Found function {} by lines!", function.name);
                     start_line = start;
+                    start_col = start_c;
                     end_line = end;
-                }
-
-                let line_diff = function.end_line - function.start_line;
-                if line_diff > 2 {
-                    remove_func_count += 1;
-                    file_res.push((function.name.clone(), start_line, end_line));
+                    end_col = end_c;
                 } else {
                     println!(
-                        "Ignoring function '{}' due to small line change (file: {})",
+                        "[MISS] Could not find appropiate match for '{}'\n\t\t (exp start: {}, end: {}, file: {})",
                         function.name,
+                        function.start_line,
+                        function.end_line,
                         path.display().to_string()
                     );
                     println!(
-                        "Found start line: {}; Found end line: {}",
-                        function.start_line, function.end_line,
+                        "[MISS-INFO] Tried finding: {}\n[MISS-INFO] Available function keys: {:?}",
+                        temp_name,
+                        funcs_by_name.keys()
                     );
+                    continue;
                 }
+
+                // let line_diff = function.end_line - function.start_line;
+                // if line_diff > 2 {
+                remove_func_count += 1;
+                file_res.push(FunctionRange {
+                    name: function.name.clone(),
+                    start_line,
+                    start_col,
+                    end_line,
+                    end_col,
+                });
+                // } else {
+                //     println!(
+                //         "[SKIP]\tSkipping function '{}' due to small line change\n\t\t (start: {}, end: {}, file: {})",
+                //         function.name,
+                //         function.start_line, function.end_line,
+                //         path.display().to_string()
+                //     );
+                // }
             }
 
             result.push((path, file_res));
         }
 
         println!(
-            "Removing {} of {} functions",
+            "[STATS]\tRemoving {} of {} functions",
             remove_func_count, total_func_count
         );
         Ok(result)
     }
 
-    pub fn replace_lines_in_file(
+    fn replace_lines_in_file(
         &self,
         file_path: &PathBuf,
         replacement_str: &str,
         additional_imports: &Vec<String>,
-        skip_ranges: &Vec<(String, usize, usize)>,
+        skip_ranges: &Vec<FunctionRange>,
         no_change: bool,
     ) -> io::Result<()> {
         if skip_ranges.len() == 0 {
@@ -422,8 +472,15 @@ impl Remover {
         for (line_no, line) in reader.lines().enumerate() {
             let line_no = line_no + 1;
             let line = line?;
-            if let Some((name, start, end)) = skip_range {
-                if line_no <= *start || line_no > *end {
+            if let Some(frange) = skip_range {
+                let (name, start, end, start_col, end_col) = (
+                    frange.name.clone(),
+                    frange.start_line,
+                    frange.end_line,
+                    frange.start_col,
+                    frange.end_col,
+                );
+                if line_no < start || line_no > end {
                     // Write lines not in the specified range to the temporary file
                     if no_change {
                         println!("{}", line);
@@ -431,19 +488,31 @@ impl Remover {
                         writeln!(writer, "{}", line)?;
                     }
                 } else {
+                    if line_no == start {
+                        if no_change {
+                            print!("{}{{", line[..start_col].to_string());
+                        } else {
+                            write!(writer, "{}{{", line[..start_col].to_string())?;
+                        }
+                    }
                     // We reached the end of the current skip range
-                    if *end <= line_no {
+                    if line_no == end {
                         // Replace placeholders
                         let replacement_str = replacement_str
-                            .replace("{func_name}", name)
+                            .replace("{func_name}", &name)
                             .replace("{file_name}", &file_path.display().to_string());
-                        // Insert our "dummy code"
-                        if no_change {
-                            println!("{}", replacement_str);
-                            println!("}}");
+                        let remainder = if line.len() > end_col {
+                            &line[end_col + 1..]
                         } else {
-                            writeln!(writer, "{}", replacement_str)?;
-                            writeln!(writer, "}}")?;
+                            ""
+                        };
+                        // Insert our "dummy code" and the remainder
+                        if no_change {
+                            print!("{}", replacement_str);
+                            println!("}}{}", remainder.to_string());
+                        } else {
+                            write!(writer, "{}", replacement_str)?;
+                            writeln!(writer, "}}{}", remainder.to_string())?;
                         }
 
                         // Fetch the next skip range
