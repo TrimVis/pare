@@ -8,6 +8,7 @@ clap = { version = "4.5.23", features = ["derive"] }
 clap-num = "1.1.1"
 ordered-float = "4.6.0"
 plotters = "0.3.7"
+regex = "1.11.1"
 rusqlite = "0.32.1"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_derive = "1.0.217"

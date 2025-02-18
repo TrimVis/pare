@@ -14,8 +14,9 @@ path_prefix = [
 ]
 
 # TODO: Investigate where the consistent offset comes from
-[path."/local/home/jordanpa/cvc5-repo/src/theory/theory_engine.cpp"]
-ignore = {this = true}
+# FIXME: One of the reasons for these offsets is that gcov apparently ignores inlined functions
+# [path."/local/home/jordanpa/cvc5-repo/src/theory/theory_engine.cpp"]
+# ignore = {this = true}
 
 [path."/local/home/jordanpa/cvc5-repo/src/api/cpp/cvc5.cpp"]
 line_ranges = [ 
