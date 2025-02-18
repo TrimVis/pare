@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::remover_config::Config;
 
-const DEBUG: bool = false;
+const DEBUG: bool = true;
 
 pub struct Remover {
     config: Config,
@@ -126,6 +126,16 @@ impl Remover {
             // if !path.ends_with("src/theory/strings/solver_state.cpp") {
             //     continue;
             // }
+            // if !path.ends_with("theory/quantifiers/cegqi/ceg_bv_instantiator.cpp") {
+            //     continue;
+            // }
+            // if !path.ends_with("src/theory/arith/linear/theory_arith_private.cpp") {
+            //     continue;
+            // }
+            // if !path.ends_with("src/theory/quantifiers/first_order_model.cpp") {
+            //     continue;
+            // }
+
             let path = path.clone();
             let original_path = path.clone();
             let path = self.config.replace_path_prefix(path);
@@ -274,12 +284,7 @@ impl Remover {
                                 || (body_chance && line.trim_end().ends_with(","))
                                 || (body_chance && str == ")");
                         }
-                        res || (open_count > 0
-                            && line
-                                .chars()
-                                .filter(|c| ['{', '}'].contains(c))
-                                .collect::<String>()
-                                .ends_with("{}"))
+                        res
                     };
                     if entered_body {
                         in_init_list = false;
@@ -290,11 +295,31 @@ impl Remover {
                     }
                 }
 
+                let func_ended = {
+                    if !is_inline {
+                        if !entered_body
+                            && open_count > 0
+                            && line
+                                .chars()
+                                .filter(|c| ['{', '}'].contains(c))
+                                .collect::<String>()
+                                .ends_with("{}")
+                        {
+                            func_start = line_no;
+                            func_start_col = line.find("{").unwrap();
+                            true
+                        } else {
+                            entered_body != prev_entered_body && func_depth <= 0
+                        }
+                    } else {
+                        false
+                    }
+                };
                 // We just left a function body and therefore found all information about a
                 // function!
-                if !is_inline && entered_body != prev_entered_body && func_depth <= 0 {
+                if func_ended {
                     func_end = line_no;
-                    func_end_col = line.rfind("}").unwrap_or(line.len());
+                    func_end_col = line.rfind("}").unwrap_or(0);
                     if DEBUG {
                         println!(
                             "Found function '{}' from line {} ({}) to line {}",
@@ -508,11 +533,9 @@ impl Remover {
                         };
                         // Insert our "dummy code" and the remainder
                         if no_change {
-                            print!("{}", replacement_str);
-                            println!("}}{}", remainder.to_string());
+                            print!("{}}}{}", replacement_str, remainder.to_string());
                         } else {
-                            write!(writer, "{}", replacement_str)?;
-                            writeln!(writer, "}}{}", remainder.to_string())?;
+                            write!(writer, "{}}}{}", replacement_str, remainder.to_string())?;
                         }
 
                         // Fetch the next skip range
