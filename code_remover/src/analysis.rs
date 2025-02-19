@@ -1,8 +1,12 @@
+use bitvec::prelude::*;
+use ordered_float::OrderedFloat;
 use plotters::prelude::*;
+use rayon::prelude::*;
 use rusqlite::{params, Connection, OpenFlags};
-use std::collections::HashMap;
-use std::fs::File;
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 
 pub struct Analyzer {
     db_path: String,
@@ -28,7 +32,44 @@ impl Analyzer {
         Ok(self.line_deviations.as_ref().unwrap())
     }
 
-    pub fn analyze(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn analyze_smallest_benches(&mut self, p: f64) -> Result<(), Box<dyn std::error::Error>> {
+        if p <= 0.0 || p > 1.00 {
+            return Err(Box::from("Expected a p value in range (0,1]"));
+        }
+
+        let table_name = format!(
+            "optimization_result_p0_{}",
+            (OrderedFloat(p) * OrderedFloat(10000.0)).round() as u32
+        );
+
+        let fuid_bench_map: HashMap<String, PathBuf> = self.check_min_benches(&table_name)?;
+        println!(
+            "Mapping of benchmarks requiring removed functions for p={} (Total: {}):",
+            p,
+            fuid_bench_map.len()
+        );
+        for (fuid, bench) in fuid_bench_map.iter() {
+            println!(
+                "\tFunction '{}' needs '{}'",
+                fuid,
+                bench.display().to_string()
+            );
+        }
+
+        let bench_set: HashSet<&PathBuf> = HashSet::from_iter(fuid_bench_map.values());
+        println!(
+            "Set of minimal benchmark examples removed for p={} (Total: {}):",
+            p,
+            bench_set.len()
+        );
+        for bench in bench_set {
+            println!("\t{}", bench.display().to_string());
+        }
+
+        Ok(())
+    }
+
+    pub fn analyze_line_deviations(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let line_deviations = self.get_line_deviations()?;
 
         let mut total_count = 0;
@@ -83,7 +124,10 @@ impl Analyzer {
         Ok(())
     }
 
-    pub fn visualize(&mut self, dst_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn visualize_line_deviations(
+        &mut self,
+        dst_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let line_deviations = self.get_line_deviations()?;
         let mut start_deviations = HashMap::new();
         let mut end_deviations = HashMap::new();
@@ -144,6 +188,118 @@ impl Analyzer {
         println!("Result has been saved to {}", dst_path);
 
         Ok(())
+    }
+
+    fn count_benchmark_tokens(bench_path: &PathBuf) -> Result<usize, Box<dyn std::error::Error>> {
+        let mut token_count: usize = 0;
+
+        let file = fs::read(bench_path)?;
+        // Ignore the content of set-info to not dilute the word count
+        let mut in_info = false;
+        for line in file.lines() {
+            let line = line?;
+            if line.trim_start().starts_with("(set-info ") {
+                in_info = true;
+            }
+            if !in_info {
+                token_count += line.split_whitespace().count();
+            }
+            if in_info && line.trim_end().ends_with(")") {
+                in_info = false;
+            }
+        }
+
+        Ok(token_count)
+    }
+
+    fn check_min_benches(
+        &self,
+        table_name: &String,
+    ) -> Result<HashMap<String, PathBuf>, Box<dyn std::error::Error>> {
+        let conn = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+
+        println!("Retrieving token count for each benchmark...");
+        let stmt = "SELECT id, path FROM \"benchmarks\" ORDER BY id";
+        let mut stmt = conn.prepare(&stmt)?;
+        let rows = stmt.query_map(params![], |row| {
+            let id: usize = row.get(0)?;
+            let path: String = row.get(1)?;
+            // FIXME: For testing only
+            let path = path.replace("/local/home/jordanpa/master/", "../");
+            let path = PathBuf::from(path);
+
+            Ok((id, path))
+        })?;
+        let mut ires = vec![];
+        for row in rows {
+            if let Ok((id, path)) = row {
+                ires.push((id, path));
+            }
+        }
+        let benchmark_pairs: Vec<(usize, (PathBuf, usize))> = ires
+            .par_iter()
+            .map(|(id, path)| {
+                // println!("Analyzing Path: {}", path.display().to_string());
+                let token_count = Self::count_benchmark_tokens(&path);
+                if token_count.is_err() {
+                    println!(
+                        "Error during file {} encountered. Skipping...",
+                        path.display().to_string()
+                    );
+                }
+                let token_count = token_count.unwrap_or(usize::MAX);
+                (*id, (path.clone(), token_count))
+            })
+            .collect();
+        let mut benchmarks: HashMap<usize, (PathBuf, usize)> = HashMap::new();
+        for (k, v) in benchmark_pairs {
+            benchmarks.insert(k, v);
+        }
+
+        println!("Finding smallest benchmark for each unused function...");
+        let stmt = format!(
+            "SELECT f.id, f.name, b.data
+            FROM \"functions\" AS f
+            JOIN \"function_bitvecs\" AS b ON b.function_id = f.id
+            JOIN \"{}\" AS r ON r.func_id = f.id
+            WHERE r.use_function = 0
+            ORDER BY f.id",
+            table_name
+        );
+        let mut stmt = conn.prepare(&stmt)?;
+        let rows = stmt.query_map(params![], |row| {
+            let id: usize = row.get(0)?;
+            let name: String = row.get(1)?;
+            let fuid = format!("{}:{}", id, name);
+
+            let slice: &[u8] = row.get_ref(2)?.as_blob()?;
+            let bitvec: BitVec<u8, Msb0> = BitVec::from_slice(slice);
+            let smallest_bench: PathBuf = {
+                let mut smallest_token_count = usize::MAX;
+                let mut smallest_path: PathBuf = PathBuf::new();
+                for (bench_id, bench_required) in bitvec.iter().enumerate() {
+                    if !bench_required {
+                        continue;
+                    }
+                    let bench_id = bench_id + 1;
+                    let (bench_path, bench_token_count) = benchmarks.get(&bench_id).unwrap();
+                    if bench_token_count < &smallest_token_count {
+                        smallest_token_count = *bench_token_count;
+                        smallest_path = bench_path.clone();
+                    }
+                }
+                smallest_path
+            };
+
+            Ok((fuid, smallest_bench))
+        })?;
+        let mut min_benches: HashMap<String, PathBuf> = HashMap::new();
+        for row in rows {
+            if let Ok((fuid, smallest_bench)) = row {
+                min_benches.insert(fuid, smallest_bench);
+            }
+        }
+        Ok(min_benches)
     }
 
     fn check_func_range_correctness(
