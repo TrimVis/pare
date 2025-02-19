@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::remover_config::Config;
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 pub struct Remover {
     config: Config,
@@ -330,14 +330,14 @@ impl Remover {
                         );
                     }
 
-                    if func_name.is_some() {
-                        let mut real_func_name: String = String::new();
+                    if let Some(func_name) = func_name {
+                        let mut func_name_prefix: String = String::new();
                         for (_, n) in namespace_prefix.iter() {
-                            real_func_name.push_str((n.to_string() + "::").as_str());
+                            func_name_prefix.push_str((n.to_string() + "::").as_str());
                         }
-                        real_func_name.push_str(func_name.unwrap().clone().as_str());
+                        let full_func_name = func_name_prefix.clone() + func_name.clone().as_str();
                         funcs_by_name.insert(
-                            real_func_name.clone(),
+                            full_func_name.clone(),
                             (
                                 line_offset + func_start,
                                 line_offset + func_end,
@@ -345,7 +345,33 @@ impl Remover {
                                 func_end_col,
                             ),
                         );
-                        // println!("Detected Function Name: {}", real_func_name);
+                        // Additional entry as gcov sometimes does not use the last namespace id
+                        if let Some((_, func_name)) = func_name.rsplit_once("::") {
+                            let reduced_func_name = format!("{}{}", func_name_prefix, func_name);
+                            funcs_by_name.insert(
+                                reduced_func_name.clone(),
+                                (
+                                    line_offset + func_start,
+                                    line_offset + func_end,
+                                    func_start_col,
+                                    func_end_col,
+                                ),
+                            );
+                        }
+                        // Additional entry as gcov sometimes does not use the class identifier
+                        let func_parts: Vec<&str> = func_name_prefix.rsplitn(3, "::").collect();
+                        if func_parts.len() == 3 {
+                            let reduced_func_name = format!("{}::{}", func_parts[2], func_name);
+                            funcs_by_name.insert(
+                                reduced_func_name.clone(),
+                                (
+                                    line_offset + func_start,
+                                    line_offset + func_end,
+                                    func_start_col,
+                                    func_end_col,
+                                ),
+                            );
+                        }
                     }
                     funcs_by_lines.insert(
                         (func_start - func_start_offset, func_end),
@@ -424,11 +450,13 @@ impl Remover {
                         function.end_line,
                         path.display().to_string()
                     );
-                    println!(
+                    if DEBUG {
+                        println!(
                         "[MISS-INFO] Tried finding: {}\n[MISS-INFO] Available function keys: {:?}",
                         temp_name,
                         funcs_by_name.keys()
                     );
+                    }
                     continue;
                 }
 
