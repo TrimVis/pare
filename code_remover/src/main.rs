@@ -23,6 +23,10 @@ enum Commands {
 
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Replaces substring in paths extracted from DB, to accomodate for a system change
+        #[arg(long, num_args = 2, value_names=vec!["FROM", "TO"])]
+        path_rewrite: Option<Vec<String>>,
     },
 
     // Finds the smallest benchmark for each removed function, for further analysis
@@ -32,6 +36,10 @@ enum Commands {
 
         #[arg(short, long)]
         p: f64,
+
+        /// Replaces substring in paths extracted from DB, to accomodate for a system change
+        #[arg(long, num_args = 2, value_names=vec!["FROM", "TO"])]
+        path_rewrite: Option<Vec<String>>,
     },
 
     /// Remove the functions that have been determined as unneccessary by our optimization step
@@ -52,8 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let remover = remover::Remover::new(config);
             remover.remove(no_change.unwrap_or(true))?;
         }
-        Some(Commands::VisualizeFunctionRanges { db, output }) => {
-            let mut analyzer = analysis::Analyzer::new(db.display().to_string());
+        Some(Commands::VisualizeFunctionRanges {
+            db,
+            output,
+            path_rewrite,
+        }) => {
+            let mut analyzer = analysis::Analyzer::new(db.display().to_string(), path_rewrite);
             analyzer.analyze_line_deviations()?;
             analyzer.visualize_line_deviations(
                 output
@@ -62,8 +74,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap(),
             )?;
         }
-        Some(Commands::RetrieveSmallestBenches { db, p }) => {
-            let mut analyzer = analysis::Analyzer::new(db.display().to_string());
+        Some(Commands::RetrieveSmallestBenches {
+            db,
+            p,
+            path_rewrite,
+        }) => {
+            let mut analyzer = analysis::Analyzer::new(db.display().to_string(), path_rewrite);
             analyzer.analyze_smallest_benches(p)?;
         }
         None => {}

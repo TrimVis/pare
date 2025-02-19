@@ -8,16 +8,21 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+const DEBUG: bool = false;
+
 pub struct Analyzer {
     db_path: String,
+    path_rewrite: Option<(String, String)>,
+
     line_deviations: Option<HashMap<(String, String), (i64, i64)>>,
 }
 
 impl Analyzer {
-    pub fn new(db_path: String) -> Self {
+    pub fn new(db_path: String, path_rewrite: Option<Vec<String>>) -> Self {
         Analyzer {
             db_path,
             line_deviations: None,
+            path_rewrite: path_rewrite.map(|v| (v[0].to_owned(), v[1].to_owned())),
         }
     }
 
@@ -223,9 +228,14 @@ impl Analyzer {
         let mut stmt = conn.prepare(&stmt)?;
         let rows = stmt.query_map(params![], |row| {
             let id: usize = row.get(0)?;
-            let path: String = row.get(1)?;
-            // FIXME: For testing only
-            let path = path.replace("/local/home/jordanpa/master/", "../");
+            let mut path: String = row.get(1)?;
+            if let Some((old, new)) = self.path_rewrite.clone() {
+                let old_path = path.clone();
+                path = path.replace(old.as_str(), new.as_str());
+                if DEBUG {
+                    println!("Changing path '{}' to '{}'", old_path, path);
+                }
+            }
             let path = PathBuf::from(path);
 
             Ok((id, path))
@@ -327,21 +337,21 @@ impl Analyzer {
         let mut func_line_deviations: HashMap<(String, String), (i64, i64)> = HashMap::new();
         for row in rows {
             if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
-                // FIXME: Filter these out ahead of time
-                if path.starts_with("/local/home/jordanpa/cvc5-repo/build/") {
-                    continue;
+                let mut path = path;
+                if let Some((old, new)) = self.path_rewrite.clone() {
+                    let old_path = path.clone();
+                    path = path.replace(old.as_str(), new.as_str());
+                    if DEBUG {
+                        println!("Changing path '{}' to '{}'", old_path, path);
+                    }
                 }
 
-                // FIXME: Detect Constructors in a better way
-                // FIXME: Detect destructors in a better way
-                if name.contains("::~") {
+                let input = if let Ok(v) = File::open(&path) {
+                    v
+                } else {
+                    println!("Could not open source file '{}'", path);
                     continue;
-                }
-
-                // FIXME: This is for local testing only
-                let path = path.replace("/local/home/jordanpa/", "../../");
-
-                let input = File::open(&path)?;
+                };
                 let reader = BufReader::new(input);
 
                 let mut real_start_line = start_line;
