@@ -51,7 +51,8 @@ impl Analyzer {
             (OrderedFloat(p) * OrderedFloat(10000.0)).round() as u32
         );
 
-        let fuid_bench_map: HashMap<String, PathBuf> = self.check_min_benches(&table_name)?;
+        let (fuid_bench_map, token_counts): (HashMap<String, PathBuf>, HashMap<String, usize>) =
+            self.check_min_benches(&table_name)?;
         println!(
             "Mapping of benchmarks requiring removed functions for p={} (Total: {}):",
             p,
@@ -73,6 +74,18 @@ impl Analyzer {
         );
         for bench in bench_set {
             println!("\t{}", bench.display().to_string());
+        }
+
+        println!(
+            "Top 100 used tokens of minimal benchmark examples for p={}:",
+            p,
+        );
+        // Sort the hashmap by occurence
+        let mut count_vec: Vec<(String, usize)> = token_counts.into_iter().collect();
+        count_vec.sort_by(|a, b| b.1.cmp(&a.1));
+
+        for (token, count) in count_vec.iter().take(100) {
+            println!("\t{}\t{}", count, token);
         }
 
         Ok(())
@@ -218,6 +231,32 @@ impl Analyzer {
         Ok(())
     }
 
+    fn get_benchmark_token_countset(
+        bench_path: &PathBuf,
+    ) -> Result<HashMap<String, usize>, Box<dyn std::error::Error>> {
+        let mut counts = HashMap::new();
+
+        let file = fs::read(bench_path)?;
+        // Ignore the content of set-info to not dilute the word count
+        let mut in_info = false;
+        for line in file.lines() {
+            let line = line?;
+            if line.trim_start().starts_with("(set-info ") {
+                in_info = true;
+            }
+            if !in_info {
+                for word in line.split_whitespace() {
+                    *counts.entry(word.to_string()).or_insert(0) += 1;
+                }
+            }
+            if in_info && line.trim_end().ends_with(")") {
+                in_info = false;
+            }
+        }
+
+        Ok(counts)
+    }
+
     fn count_benchmark_tokens(bench_path: &PathBuf) -> Result<usize, Box<dyn std::error::Error>> {
         let mut token_count: usize = 0;
 
@@ -243,7 +282,8 @@ impl Analyzer {
     fn check_min_benches(
         &self,
         table_name: &String,
-    ) -> Result<HashMap<String, PathBuf>, Box<dyn std::error::Error>> {
+    ) -> Result<(HashMap<String, PathBuf>, HashMap<String, usize>), Box<dyn std::error::Error>>
+    {
         let conn = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
 
         println!("Retrieving token count for each benchmark...");
@@ -327,11 +367,15 @@ impl Analyzer {
             Ok((fuid, smallest_bench))
         })?;
         let mut min_benches: HashMap<String, PathBuf> = HashMap::new();
+        let mut token_counts: HashMap<String, usize> = HashMap::new();
         for row in rows {
             if let Ok((fuid, smallest_bench)) = row {
-                min_benches.insert(fuid, smallest_bench);
+                min_benches.insert(fuid, smallest_bench.clone());
+                for (k, v) in Self::get_benchmark_token_countset(&smallest_bench)? {
+                    *token_counts.entry(k).or_insert(0) += v;
+                }
             }
         }
-        Ok(min_benches)
+        Ok((min_benches, token_counts))
     }
 }
