@@ -104,7 +104,7 @@ impl Config {
     pub fn get_imports(&self) -> Vec<String> {
         self.imports
             .clone()
-            .unwrap_or(vec!["#include <iostream>".to_string()])
+            .unwrap_or(vec!["#include <iostream>\n#include <cstdlib>".to_string()])
     }
     pub fn get_placeholder(&self) -> String {
         self.placeholder.clone().unwrap_or(

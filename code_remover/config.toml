@@ -1,25 +1,9 @@
-db = "../reports/report_solved4.sqlite"
-p = 0.90
+db = "./reports/report.sqlite"
+p = 0.75
 
-placeholder = "std::cout << \"Unsupported feature\" << std::endl; exit(1000); __builtin_unreachable();"
+# placeholder = "std::cout << \"Unsupported feature\" << std::endl; exit(1000); __builtin_unreachable();"
+placeholder = "std::cout << \"Unsupported feature\" << std::endl; exit(1000);"
+imports = ["#include <iostream>", "#include <cstdlib>"]
 
 [replace_path_prefix]
 "/local/home/jordanpa/" = "../../"
-
-[ignore]
-constructors = false
-destructors = true
-path_prefix = [
-  "/local/home/jordanpa/cvc5-repo/build/"
-]
-
-# TODO: Investigate where the consistent offset comes from
-# FIXME: One of the reasons for these offsets is that gcov apparently ignores inlined functions
-# [path."/local/home/jordanpa/cvc5-repo/src/theory/theory_engine.cpp"]
-# ignore = {this = true}
-
-[path."/local/home/jordanpa/cvc5-repo/src/api/cpp/cvc5.cpp"]
-line_ranges = [ 
- [7743, 7839]
-]
-

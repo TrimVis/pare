@@ -1,4 +1,3 @@
-
 cvc5dir := "../cvc5-repo"
 cvc5repo := "https://github.com/cvc5/cvc5.git"
 cvc5git := cvc5dir / ".git"
@@ -47,6 +46,14 @@ bench-optimize-eval +SOL_FILES: build-optimize-eval
 bench-remover: build-remover
     ./code_remover/target/release/code_remover remove --config ./code_remover/config.toml --no-change false
     @echo "Removed all rarely used functions from code base"
+
+# Find minimal illegal feature example
+bench-creduce SMT_FILE:
+    #!/usr/bin/env sh
+    export CVC5_TIME_LIMIT="5000"
+    export CVC5_BIN="$(realpath '{{cvc5dir}}/build/bin/cvc5')"
+    echo "Running creduce on inputs '{{SMT_FILE}}' to determine minimal illegal feature (timelimit: $CVC5_TIME_LIMIT, binary: $CVC5_BIN)"
+    creduce ./creduce/interestingness_test.sh {{SMT_FILE}}
 
 download-bench:
     mkdir -p "{{benchdir}}"
