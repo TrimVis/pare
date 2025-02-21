@@ -53,7 +53,9 @@ bench-creduce SMT_FILE:
     export CVC5_TIME_LIMIT="5000"
     export CVC5_BIN="$(realpath '{{cvc5dir}}/build/bin/cvc5')"
     echo "Running creduce on inputs '{{SMT_FILE}}' to determine minimal illegal feature (timelimit: $CVC5_TIME_LIMIT, binary: $CVC5_BIN)"
-    creduce ./creduce/interestingness_test.sh {{SMT_FILE}}
+    SMT_RESULT_FILE="creduce_result_$(date +%s).smt2"
+    cp {{SMT_FILE}} "$SMT_RESULT_FILE"
+    creduce ./creduce/interestingness_test.sh "$SMT_RESULT_FILE"
 
 download-bench:
     mkdir -p "{{benchdir}}"
