@@ -186,7 +186,9 @@ int main(int argc, char *argv[]) {
 
     // Some line breaks so we have clearer borders
     if (i < argc - 1) {
-      std::cout << std::endl << std::string("-", 30) << std::endl << std::endl;
+      std::string spacer = "";
+      spacer.resize(30, '-');
+      std::cout << std::endl << spacer << std::endl << std::endl;
     }
   }
 
