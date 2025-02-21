@@ -13,15 +13,20 @@ pub struct Remover {
     config: Config,
 }
 
-struct FunctionRange {
-    name: String,
-    start_line: usize,
-    start_col: usize,
-    end_line: usize,
-    end_col: usize,
+#[derive(Clone)]
+pub struct FunctionRange {
+    pub name: String,
+    pub start_line: usize,
+    pub start_col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
 }
 
 impl Remover {
+    pub fn from_config(config: Config) -> Self {
+        Remover { config }
+    }
+
     pub fn new(config_path: PathBuf) -> Self {
         let mut config_buf = String::new();
         File::open(config_path)
@@ -33,7 +38,8 @@ impl Remover {
     }
 
     pub fn remove(&self, no_change: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let rarely_used = self.get_rarely_used_lines()?;
+        let file_map = self.get_rarely_used_functions(true)?;
+        let rarely_used = self.find_function_ranges(file_map)?;
 
         for (file, line_ranges) in rarely_used {
             // println!(
@@ -44,28 +50,38 @@ impl Remover {
 
             let imports = self.config.get_imports();
             let replacement = self.config.get_placeholder();
+            let line_ranges = line_ranges.iter().map(|(v, _)| (*v).clone()).collect();
             self.replace_lines_in_file(&file, &replacement, &imports, &line_ranges, no_change)?;
         }
 
         Ok(())
     }
 
-    fn get_rarely_used_lines(
+    pub fn get_rarely_used_functions(
         &self,
-    ) -> Result<Vec<(PathBuf, Vec<FunctionRange>)>, Box<dyn std::error::Error>> {
+        rarely_used: bool,
+    ) -> Result<HashMap<PathBuf, Vec<FunctionRange>>, Box<dyn std::error::Error>> {
         let conn = self.config.connect_to_db()?;
         let table_name = self.config.get_table_name()?;
         println!("[INFO] Table name: {}", table_name);
 
-        let stmt = format!(
-            "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
+        let stmt = if rarely_used {
+            format!(
+                "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
                 FROM \"functions\" AS f
                 JOIN \"sources\" AS s ON s.id = f.source_id
                 JOIN \"{}\" AS u ON f.id = u.func_id
                 WHERE u.use_function = 0
                 ORDER BY s.path, f.start_line",
-            table_name
-        );
+                table_name
+            )
+        } else {
+            "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
+                FROM \"functions\" AS f
+                JOIN \"sources\" AS s ON s.id = f.source_id
+                ORDER BY s.path, f.start_line"
+                .to_string()
+        };
         let mut stmt = conn.prepare(&stmt)?;
         let rows = stmt.query_map(params![], |row| {
             let path: String = row.get(0)?;
@@ -78,10 +94,6 @@ impl Remover {
             Ok((path, name, start_line, start_col, end_line, end_col))
         })?;
 
-        // Keep track of some statistics
-        let mut total_func_count = 0;
-        let mut remove_func_count = 0;
-
         // Aggregate query results into file_map, which groups the functions by files
         let file_map: HashMap<PathBuf, Vec<FunctionRange>> = {
             let mut result_map: HashMap<PathBuf, Vec<FunctionRange>> = HashMap::new();
@@ -89,7 +101,6 @@ impl Remover {
             let mut curr_funcs: Vec<FunctionRange> = Vec::new();
             for row in rows {
                 if let Ok((path, name, start_line, start_col, end_line, end_col)) = row {
-                    total_func_count += 1;
                     let path = PathBuf::from(path);
                     if curr_funcs.is_empty() {
                         curr_path = path.clone();
@@ -116,10 +127,22 @@ impl Remover {
 
             result_map
         };
+        Ok(file_map)
+    }
+
+    pub fn find_function_ranges(
+        &self,
+        file_map: HashMap<PathBuf, Vec<FunctionRange>>,
+    ) -> Result<Vec<(PathBuf, Vec<(FunctionRange, FunctionRange)>)>, Box<dyn std::error::Error>>
+    {
+        // Keep track of some statistics
+        let mut total_func_count = 0;
+        let mut remove_func_count = 0;
 
         let mut result = vec![];
 
         for (path, functions) in file_map.iter() {
+            total_func_count += functions.len();
             // if !path.ends_with("src/theory/arrays/theory_arrays_rewriter.cpp") {
             //     continue;
             // }
@@ -423,7 +446,8 @@ impl Remover {
                 // reported by gcov being wrong...
 
                 // Detected function start and end by name
-                let temp_name = function.name.split_once("(").unwrap().0;
+                let temp_name = function.name.split_once("(").map(|v| v.0);
+                let temp_name = temp_name.unwrap_or(function.name.as_str());
                 // println!("Checking for function {}!", temp_name);
                 // println!("Keys: {:?}", funcs_by_name.keys());
                 if let Some(&(start, end, start_c, end_c)) = funcs_by_name.get(temp_name) {
@@ -463,13 +487,15 @@ impl Remover {
                 // let line_diff = function.end_line - function.start_line;
                 // if line_diff > 2 {
                 remove_func_count += 1;
-                file_res.push(FunctionRange {
+                let correct_ranges = FunctionRange {
                     name: function.name.clone(),
                     start_line,
                     start_col,
                     end_line,
                     end_col,
-                });
+                };
+                let reported_ranges = function.clone();
+                file_res.push((correct_ranges, reported_ranges));
                 // } else {
                 //     println!(
                 //         "[SKIP]\tSkipping function '{}' due to small line change\n\t\t (start: {}, end: {}, file: {})",

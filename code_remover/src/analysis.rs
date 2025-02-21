@@ -4,9 +4,12 @@ use plotters::prelude::*;
 use rayon::prelude::*;
 use rusqlite::{params, Connection, OpenFlags};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::fs::{self};
+use std::io::BufRead;
 use std::path::PathBuf;
+
+use crate::remover::{FunctionRange, Remover};
+use crate::remover_config::Config;
 
 const DEBUG: bool = false;
 
@@ -14,27 +17,28 @@ pub struct Analyzer {
     db_path: String,
     path_rewrite: Option<(String, String)>,
 
-    line_deviations: Option<HashMap<(String, String), (i64, i64)>>,
+    remover: Remover,
 }
 
 impl Analyzer {
     pub fn new(db_path: String, path_rewrite: Option<Vec<String>>) -> Self {
+        let path_rewrite = path_rewrite.map(|v| (v[0].to_owned(), v[1].to_owned()));
+        let config = Config::new_minimal(PathBuf::from(db_path.clone()), path_rewrite.clone());
         Analyzer {
             db_path,
-            line_deviations: None,
-            path_rewrite: path_rewrite.map(|v| (v[0].to_owned(), v[1].to_owned())),
+            path_rewrite,
+            remover: Remover::from_config(config),
         }
     }
 
-    pub fn get_line_deviations(
+    pub fn get_functions(
         &mut self,
-    ) -> Result<&HashMap<(String, String), (i64, i64)>, Box<dyn std::error::Error>> {
-        if self.line_deviations.is_none() {
-            let res = self.check_func_range_correctness()?;
-            self.line_deviations = Some(res);
-        }
+    ) -> Result<Vec<(PathBuf, Vec<(FunctionRange, FunctionRange)>)>, Box<dyn std::error::Error>>
+    {
+        let file_map = self.remover.get_rarely_used_functions(false)?;
+        let function_ranges = self.remover.find_function_ranges(file_map)?;
 
-        Ok(self.line_deviations.as_ref().unwrap())
+        Ok(function_ranges)
     }
 
     pub fn analyze_smallest_benches(&mut self, p: f64) -> Result<(), Box<dyn std::error::Error>> {
@@ -75,32 +79,36 @@ impl Analyzer {
     }
 
     pub fn analyze_line_deviations(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let line_deviations = self.get_line_deviations()?;
+        let function_ranges = self.get_functions()?;
 
         let mut total_count = 0;
         let mut start_dev_count = 0;
         let mut end_dev_count = 0;
         let mut avg_start = 0;
         let mut avg_end = 0;
-        let mut max_start = i64::MIN;
-        let mut max_end = i64::MIN;
-        let mut min_start = i64::MAX;
-        let mut min_end = i64::MAX;
-        for ((_path, _name), &(start_dev, end_dev)) in line_deviations {
-            total_count += 1;
+        let mut max_start = usize::MIN;
+        let mut max_end = usize::MIN;
+        let mut min_start = usize::MAX;
+        let mut min_end = usize::MAX;
+        for (_path, functions) in function_ranges {
+            for (detected_range, gcov_range) in functions {
+                total_count += 1;
+                let start_dev = detected_range.start_line.abs_diff(gcov_range.start_line);
+                let end_dev = detected_range.end_line.abs_diff(gcov_range.end_line);
 
-            if end_dev != 0 {
-                avg_end += end_dev;
-                end_dev_count += 1;
+                if end_dev != 0 {
+                    avg_end += end_dev;
+                    end_dev_count += 1;
+                }
+                if start_dev != 0 {
+                    avg_start += start_dev;
+                    start_dev_count += 1;
+                }
+                max_start = max_start.max(start_dev);
+                max_end = max_end.max(end_dev);
+                min_start = min_start.min(start_dev);
+                min_end = min_end.min(end_dev);
             }
-            if start_dev != 0 {
-                avg_start += start_dev;
-                start_dev_count += 1;
-            }
-            max_start = max_start.max(start_dev);
-            max_end = max_end.max(end_dev);
-            min_start = min_start.min(start_dev);
-            min_end = min_end.min(end_dev);
         }
         let avg_start = avg_start as f64 / total_count as f64;
         let avg_end = avg_end as f64 / total_count as f64;
@@ -133,10 +141,25 @@ impl Analyzer {
         &mut self,
         dst_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let line_deviations = self.get_line_deviations()?;
+        let line_deviations: Vec<(usize, usize)> = self
+            .get_functions()?
+            .iter()
+            .flat_map(|(_path, functions)| {
+                let f: Vec<(usize, usize)> = functions
+                    .iter()
+                    .map(|(detected_range, gcov_range)| {
+                        (
+                            detected_range.start_line.abs_diff(gcov_range.start_line),
+                            detected_range.end_line.abs_diff(gcov_range.end_line),
+                        )
+                    })
+                    .collect();
+                f
+            })
+            .collect();
         let mut start_deviations = HashMap::new();
         let mut end_deviations = HashMap::new();
-        line_deviations.values().for_each(|(start_dev, end_dev)| {
+        line_deviations.iter().for_each(|(start_dev, end_dev)| {
             if let Some(v) = start_deviations.get_mut(start_dev) {
                 *v += 1;
             } else {
@@ -184,7 +207,7 @@ impl Analyzer {
             chart.draw_series(
                 Histogram::vertical(&chart)
                     .style(RED.mix(0.5).filled())
-                    .data(deviations.iter().map(|(&&k, &v)| (k, v))),
+                    .data(deviations.iter().map(|(&&k, &v)| (k as i64, v as i64))),
             )?;
         }
 
@@ -310,81 +333,5 @@ impl Analyzer {
             }
         }
         Ok(min_benches)
-    }
-
-    fn check_func_range_correctness(
-        &self,
-    ) -> Result<HashMap<(String, String), (i64, i64)>, Box<dyn std::error::Error>> {
-        let conn = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-
-        let stmt = format!(
-            "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
-    FROM \"functions\" AS f
-    JOIN \"sources\" AS s ON s.id = f.source_id
-    ORDER BY s.path, f.start_line",
-        );
-        let mut stmt = conn.prepare(&stmt)?;
-        let rows = stmt.query_map(params![], |row| {
-            let path: String = row.get(0)?;
-            let name: String = row.get(1)?;
-            let start_line: usize = row.get(2)?;
-            let start_col: usize = row.get(3)?;
-            let end_line: usize = row.get(4)?;
-            let end_col: usize = row.get(5)?;
-
-            Ok((path, name, start_line, start_col, end_line, end_col))
-        })?;
-        let mut func_line_deviations: HashMap<(String, String), (i64, i64)> = HashMap::new();
-        for row in rows {
-            if let Ok((path, name, start_line, _start_col, end_line, _end_col)) = row {
-                let mut path = path;
-                if let Some((old, new)) = self.path_rewrite.clone() {
-                    let old_path = path.clone();
-                    path = path.replace(old.as_str(), new.as_str());
-                    if DEBUG {
-                        println!("Changing path '{}' to '{}'", old_path, path);
-                    }
-                }
-
-                let input = if let Ok(v) = File::open(&path) {
-                    v
-                } else {
-                    println!("Could not open source file '{}'", path);
-                    continue;
-                };
-                let reader = BufReader::new(input);
-
-                let mut real_start_line = start_line;
-                let mut real_end_line = end_line;
-
-                let mut func_body_entered = false;
-                for (line_no, line) in reader.lines().enumerate().skip(start_line) {
-                    let line_no = line_no + 1;
-                    let line = line?;
-
-                    // If inside the specified write lines until the body block has started
-                    if !func_body_entered {
-                        func_body_entered = line.ends_with("{");
-                        if func_body_entered {
-                            real_start_line = line_no;
-                        }
-                    }
-
-                    if func_body_entered {
-                        if line_no <= end_line - 2 {
-                            continue;
-                        } else if line.ends_with("}") {
-                            real_end_line = line_no;
-                            break;
-                        }
-                    }
-                }
-
-                let start_deviation = (real_start_line as i64) - (start_line as i64);
-                let end_deviation = (real_end_line as i64) - (end_line as i64);
-                func_line_deviations.insert((path, name), (start_deviation, end_deviation));
-            }
-        }
-        Ok(func_line_deviations)
     }
 }

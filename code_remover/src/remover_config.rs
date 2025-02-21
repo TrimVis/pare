@@ -62,6 +62,27 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn new_minimal(db: PathBuf, replace_path_prefix: Option<(String, String)>) -> Self {
+        let replace_path = replace_path_prefix.map(|(from, to)| {
+            let mut replace_path = HashMap::new();
+            replace_path.insert(from, to);
+            replace_path
+        });
+        Config {
+            db,
+            p: 1.0,
+            placeholder: None,
+            imports: None,
+            path: HashMap::new(),
+            replace_path_prefix: replace_path,
+            ignore: ConfigIgnore {
+                path_prefix: vec![],
+                constructors: true,
+                destructors: true,
+            },
+        }
+    }
+
     pub fn get_table_name(&self) -> Result<String, String> {
         if self.p <= 0.0 || self.p > 1.00 {
             return Err("Expected a p value in range (0,1]".to_string());
