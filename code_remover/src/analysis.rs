@@ -41,7 +41,11 @@ impl Analyzer {
         Ok(function_ranges)
     }
 
-    pub fn analyze_smallest_benches(&mut self, p: f64) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn analyze_smallest_benches(
+        &mut self,
+        p: f64,
+        top_x: Option<usize>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if p <= 0.0 || p > 1.00 {
             return Err(Box::from("Expected a p value in range (0,1]"));
         }
@@ -76,16 +80,18 @@ impl Analyzer {
             println!("\t{}", bench.display().to_string());
         }
 
-        println!(
-            "Top 100 used tokens of minimal benchmark examples for p={}:",
-            p,
-        );
-        // Sort the hashmap by occurence
-        let mut count_vec: Vec<(String, usize)> = token_counts.into_iter().collect();
-        count_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        if let Some(top_x) = top_x {
+            println!(
+                "Top {} used tokens of minimal benchmark examples for p={}:",
+                top_x, p,
+            );
+            // Sort the hashmap by occurence
+            let mut count_vec: Vec<(String, usize)> = token_counts.into_iter().collect();
+            count_vec.sort_by(|a, b| b.1.cmp(&a.1));
 
-        for (token, count) in count_vec.iter().take(100) {
-            println!("\t{}\t{}", count, token);
+            for (token, count) in count_vec.iter().take(top_x) {
+                println!("\t{}\t{}", count, token);
+            }
         }
 
         Ok(())

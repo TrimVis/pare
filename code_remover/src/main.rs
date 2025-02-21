@@ -37,6 +37,10 @@ enum Commands {
         #[arg(short, long)]
         p: f64,
 
+        // Show the x top tokens used across the smallest benchmarks
+        #[arg(short, long)]
+        top_tokens: Option<usize>,
+
         /// Replaces substring in paths extracted from DB, to accomodate for a system change
         #[arg(long, num_args = 2, value_names=vec!["FROM", "TO"])]
         path_rewrite: Option<Vec<String>>,
@@ -78,9 +82,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             db,
             p,
             path_rewrite,
+            top_tokens,
         }) => {
             let mut analyzer = analysis::Analyzer::new(db.display().to_string(), path_rewrite);
-            analyzer.analyze_smallest_benches(p)?;
+            analyzer.analyze_smallest_benches(p, top_tokens)?;
         }
         None => {}
     }
