@@ -191,8 +191,8 @@ void get_function_stats_from_db(std::string db_file,
   }
 
   sqlite3_stmt *stmt;
-  const char *query =
-      "SELECT id FROM result_benchmarks WHERE exit_code = 0 ORDER BY id";
+  const char *query = "SELECT bench_id FROM result_benchmarks WHERE exit_code "
+                      "= 0 ORDER BY bench_id";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
