@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Some(Commands::Remove { config, no_change }) => {
-            let remover = remover::Remover::new(config);
+            let mut remover = remover::Remover::new(config);
             remover.remove(no_change.unwrap_or(true))?;
         }
         Some(Commands::VisualizeFunctionRanges {

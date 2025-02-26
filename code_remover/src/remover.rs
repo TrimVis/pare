@@ -9,10 +9,6 @@ use crate::remover_config::Config;
 
 const DEBUG: bool = false;
 
-pub struct Remover {
-    config: Config,
-}
-
 #[derive(Clone)]
 pub struct FunctionRange {
     pub name: String,
@@ -22,9 +18,45 @@ pub struct FunctionRange {
     pub end_col: usize,
 }
 
+struct StatPair {
+    removable: Option<usize>,
+    removed: Option<usize>,
+    total: Option<usize>,
+}
+
+impl StatPair {
+    fn empty() -> Self {
+        StatPair {
+            removable: None,
+            removed: None,
+            total: None,
+        }
+    }
+}
+
+struct Stats {
+    funcs: StatPair,
+    lines: StatPair,
+
+    missed_funcs: HashMap<PathBuf, Vec<String>>,
+}
+
+pub struct Remover {
+    config: Config,
+
+    stats: Stats,
+}
+
 impl Remover {
     pub fn from_config(config: Config) -> Self {
-        Remover { config }
+        Remover {
+            config,
+            stats: Stats {
+                funcs: StatPair::empty(),
+                lines: StatPair::empty(),
+                missed_funcs: HashMap::new(),
+            },
+        }
     }
 
     pub fn new(config_path: PathBuf) -> Self {
@@ -34,10 +66,17 @@ impl Remover {
             .read_to_string(&mut config_buf)
             .expect("Could not read config file");
         let config = toml::from_str(&config_buf).unwrap();
-        Remover { config }
+        Remover {
+            config,
+            stats: Stats {
+                funcs: StatPair::empty(),
+                lines: StatPair::empty(),
+                missed_funcs: HashMap::new(),
+            },
+        }
     }
 
-    pub fn remove(&self, no_change: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn remove(&mut self, no_change: bool) -> Result<(), Box<dyn std::error::Error>> {
         let file_map = self.get_rarely_used_functions(true)?;
         let rarely_used = self.find_function_ranges(file_map)?;
 
@@ -53,6 +92,18 @@ impl Remover {
             let line_ranges = line_ranges.iter().map(|(v, _)| (*v).clone()).collect();
             self.replace_lines_in_file(&file, &replacement, &imports, &line_ranges, no_change)?;
         }
+
+        // Print some overall stats for evaluation
+        println!(
+            "[STATS] \tRemoved {} of {} functions",
+            self.stats.funcs.removed.unwrap(),
+            self.stats.funcs.total.unwrap()
+        );
+        println!(
+            "[STATS] \tRemoved {} of {} lines",
+            self.stats.lines.removed.unwrap(),
+            self.stats.lines.total.unwrap()
+        );
 
         Ok(())
     }
@@ -131,33 +182,24 @@ impl Remover {
     }
 
     pub fn find_function_ranges(
-        &self,
+        &mut self,
         file_map: HashMap<PathBuf, Vec<FunctionRange>>,
     ) -> Result<Vec<(PathBuf, Vec<(FunctionRange, FunctionRange)>)>, Box<dyn std::error::Error>>
     {
         // Keep track of some statistics
         let mut total_func_count = 0;
-        let mut remove_func_count = 0;
+        let mut removable_func_count = 0;
+        let mut total_line_count = 0;
+        let mut removable_line_count = 0;
 
         let mut result = vec![];
 
         for (path, functions) in file_map.iter() {
             total_func_count += functions.len();
-            // if !path.ends_with("src/theory/arrays/theory_arrays_rewriter.cpp") {
-            //     continue;
-            // }
-            // if !path.ends_with("src/theory/strings/solver_state.cpp") {
-            //     continue;
-            // }
-            // if !path.ends_with("theory/quantifiers/cegqi/ceg_bv_instantiator.cpp") {
-            //     continue;
-            // }
-            // if !path.ends_with("src/theory/arith/linear/theory_arith_private.cpp") {
-            //     continue;
-            // }
-            // if !path.ends_with("src/theory/quantifiers/first_order_model.cpp") {
-            //     continue;
-            // }
+            total_line_count += functions
+                .iter()
+                .map(|f| f.end_line - f.start_line)
+                .sum::<usize>();
 
             let path = path.clone();
             let original_path = path.clone();
@@ -209,6 +251,7 @@ impl Remover {
             // Try to parse all functions manually and make them accessible via range and via name
             let mut funcs_by_name = HashMap::new();
             let mut funcs_by_lines = HashMap::new();
+            let mut missed_funcs = vec![];
 
             for line in reader.lines() {
                 let mut line = line?;
@@ -222,8 +265,6 @@ impl Remover {
                 } else {
                     line_offset += 1;
                 }
-                // let line_no = line_no - 1;
-                //
 
                 if let Some(namespace) = line
                     .trim()
@@ -406,6 +447,9 @@ impl Remover {
                         ),
                     );
 
+                    removable_func_count += 1;
+                    removable_line_count += func_end - func_start;
+
                     func_name = None;
                     func_depth = 0;
                 }
@@ -476,6 +520,7 @@ impl Remover {
                 }
 
                 if correct_ranges.is_none() {
+                    missed_funcs.push(function.name.clone());
                     println!(
                         "[MISS] Could not find appropiate match for '{}'\n\t\t (exp start: {}, end: {}, file: {})",
                         function.name,
@@ -495,7 +540,6 @@ impl Remover {
 
                 // let line_diff = function.end_line - function.start_line;
                 // if line_diff > 2 {
-                remove_func_count += 1;
                 let correct_ranges = correct_ranges.unwrap();
                 let reported_ranges = function.clone();
                 file_res.push((correct_ranges, reported_ranges));
@@ -509,18 +553,20 @@ impl Remover {
                 // }
             }
 
+            self.stats.missed_funcs.insert(path.clone(), missed_funcs);
             result.push((path, file_res));
         }
 
-        println!(
-            "[STATS]\tRemoving {} of {} functions",
-            remove_func_count, total_func_count
-        );
+        self.stats.funcs.removable = Some(removable_func_count);
+        self.stats.funcs.total = Some(total_func_count);
+        self.stats.lines.removable = Some(removable_line_count);
+        self.stats.lines.total = Some(total_line_count);
+
         Ok(result)
     }
 
     fn replace_lines_in_file(
-        &self,
+        &mut self,
         file_path: &PathBuf,
         replacement_str: &str,
         additional_imports: &Vec<String>,
@@ -551,6 +597,9 @@ impl Remover {
         let mut skip_iter = skip_ranges.iter();
         let mut skip_range = skip_iter.next();
 
+        let mut removed_funcs = self.stats.funcs.removed.unwrap_or(0);
+        let mut removed_lines = self.stats.lines.removed.unwrap_or(0);
+
         for (line_no, line) in reader.lines().enumerate() {
             let line_no = line_no + 1;
             let line = line?;
@@ -570,6 +619,7 @@ impl Remover {
                         writeln!(writer, "{}", line)?;
                     }
                 } else {
+                    removed_lines += 1;
                     if line_no == start {
                         if no_change {
                             print!("{}{{", line[..start_col].to_string());
@@ -597,6 +647,8 @@ impl Remover {
 
                         // Fetch the next skip range
                         skip_range = skip_iter.next();
+
+                        removed_funcs += 1;
                     }
                 }
             } else {
@@ -607,6 +659,9 @@ impl Remover {
                 }
             }
         }
+
+        self.stats.funcs.removed = Some(removed_funcs);
+        self.stats.lines.removed = Some(removed_lines);
 
         if !no_change {
             // Replace the original file with the temporary file
