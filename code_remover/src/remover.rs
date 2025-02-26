@@ -359,41 +359,41 @@ impl Remover {
                             func_name_prefix.push_str((n.to_string() + "::").as_str());
                         }
                         let full_func_name = func_name_prefix.clone() + func_name.clone().as_str();
-                        funcs_by_name.insert(
-                            full_func_name.clone(),
-                            (
+                        funcs_by_name
+                            .entry(full_func_name.clone())
+                            .or_insert(vec![])
+                            .push((
                                 line_offset + func_start,
                                 line_offset + func_end,
                                 func_start_col,
                                 func_end_col,
-                            ),
-                        );
+                            ));
                         // Additional entry as gcov sometimes does not use the last namespace id
                         if let Some((_, func_name)) = func_name.rsplit_once("::") {
                             let reduced_func_name = format!("{}{}", func_name_prefix, func_name);
-                            funcs_by_name.insert(
-                                reduced_func_name.clone(),
-                                (
+                            funcs_by_name
+                                .entry(reduced_func_name.clone())
+                                .or_insert(vec![])
+                                .push((
                                     line_offset + func_start,
                                     line_offset + func_end,
                                     func_start_col,
                                     func_end_col,
-                                ),
-                            );
+                                ));
                         }
                         // Additional entry as gcov sometimes does not use the class identifier
                         let func_parts: Vec<&str> = func_name_prefix.rsplitn(3, "::").collect();
                         if func_parts.len() == 3 {
                             let reduced_func_name = format!("{}::{}", func_parts[2], func_name);
-                            funcs_by_name.insert(
-                                reduced_func_name.clone(),
-                                (
+                            funcs_by_name
+                                .entry(reduced_func_name.clone())
+                                .or_insert(vec![])
+                                .push((
                                     line_offset + func_start,
                                     line_offset + func_end,
                                     func_start_col,
                                     func_end_col,
-                                ),
-                            );
+                                ));
                         }
                     }
                     funcs_by_lines.insert(
@@ -437,36 +437,45 @@ impl Remover {
                     continue;
                 }
 
-                let start_line;
-                let start_col;
-                let end_line;
-                let end_col;
+                let mut correct_ranges: Option<FunctionRange> = None;
 
                 // FIXME: Name detection is somewhat broken, due to sometimes the signature being
                 // reported by gcov being wrong...
+                let function_name = function
+                    .name
+                    .split_once("(")
+                    .map(|v| v.0)
+                    .unwrap_or(function.name.as_str());
 
-                // Detected function start and end by name
-                let temp_name = function.name.split_once("(").map(|v| v.0);
-                let temp_name = temp_name.unwrap_or(function.name.as_str());
-                // println!("Checking for function {}!", temp_name);
-                // println!("Keys: {:?}", funcs_by_name.keys());
-                if let Some(&(start, end, start_c, end_c)) = funcs_by_name.get(temp_name) {
-                    // println!("Found function {} by name!", function.name);
-                    start_line = start;
-                    start_col = start_c;
-                    end_line = end;
-                    end_col = end_c;
-                } else
                 // Detected function start and end by 'gcov lines'
                 if let Some(&(start, end, start_c, end_c)) =
                     funcs_by_lines.get(&(function.start_line, function.end_line))
                 {
-                    // println!("Found function {} by lines!", function.name);
-                    start_line = start;
-                    start_col = start_c;
-                    end_line = end;
-                    end_col = end_c;
-                } else {
+                    correct_ranges = Some(FunctionRange {
+                        name: function.name.clone(),
+                        start_line: start,
+                        start_col: start_c,
+                        end_line: end,
+                        end_col: end_c,
+                    });
+                } else
+                // Detected function start and end by name
+                if let Some(option_vec) = funcs_by_name.get(function_name) {
+                    // Only allow matching by name in case it is unique
+                    if option_vec.len() == 1 {
+                        let (start, end, start_c, end_c) = option_vec[0];
+                        // println!("Found function {} by name!", function.name);
+                        correct_ranges = Some(FunctionRange {
+                            name: function.name.clone(),
+                            start_line: start,
+                            start_col: start_c,
+                            end_line: end,
+                            end_col: end_c,
+                        });
+                    }
+                }
+
+                if correct_ranges.is_none() {
                     println!(
                         "[MISS] Could not find appropiate match for '{}'\n\t\t (exp start: {}, end: {}, file: {})",
                         function.name,
@@ -477,7 +486,7 @@ impl Remover {
                     if DEBUG {
                         println!(
                         "[MISS-INFO] Tried finding: {}\n[MISS-INFO] Available function keys: {:?}",
-                        temp_name,
+                        function_name,
                         funcs_by_name.keys()
                     );
                     }
@@ -487,13 +496,7 @@ impl Remover {
                 // let line_diff = function.end_line - function.start_line;
                 // if line_diff > 2 {
                 remove_func_count += 1;
-                let correct_ranges = FunctionRange {
-                    name: function.name.clone(),
-                    start_line,
-                    start_col,
-                    end_line,
-                    end_col,
-                };
+                let correct_ranges = correct_ranges.unwrap();
                 let reported_ranges = function.clone();
                 file_res.push((correct_ranges, reported_ranges));
                 // } else {

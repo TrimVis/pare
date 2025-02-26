@@ -41,6 +41,28 @@ impl Analyzer {
         Ok(function_ranges)
     }
 
+    pub fn analyze_working_benches(&mut self, p: f64) -> Result<(), Box<dyn std::error::Error>> {
+        if p <= 0.0 || p > 1.00 {
+            return Err(Box::from("Expected a p value in range (0,1]"));
+        }
+
+        let table_name = format!(
+            "optimization_result_p0_{}",
+            (OrderedFloat(p) * OrderedFloat(10000.0)).round() as u32
+        );
+
+        let working_benchmarks: Vec<PathBuf> = self.check_working_benches(&table_name)?;
+        println!(
+            "List of benchmarks that should be working for p={} (Total: {}):",
+            p,
+            working_benchmarks.len()
+        );
+        for bench_path in working_benchmarks.iter() {
+            println!("{}", bench_path.display().to_string());
+        }
+
+        Ok(())
+    }
     pub fn analyze_smallest_benches(
         &mut self,
         p: f64,
@@ -283,6 +305,66 @@ impl Analyzer {
         }
 
         Ok(token_count)
+    }
+
+    fn check_working_benches(
+        &self,
+        table_name: &String,
+    ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+        let conn = Connection::open_with_flags(&self.db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+
+        println!("Retrieving all benchmarks...");
+        let stmt = "SELECT id, path FROM \"benchmarks\"";
+        let mut stmt = conn.prepare(&stmt)?;
+        let rows = stmt.query_map(params![], |row| {
+            let id: usize = row.get(0)?;
+            let mut path: String = row.get(1)?;
+            if let Some((old, new)) = self.path_rewrite.clone() {
+                let old_path = path.clone();
+                path = path.replace(old.as_str(), new.as_str());
+                if DEBUG {
+                    println!("Changing path '{}' to '{}'", old_path, path);
+                }
+            }
+            let path = PathBuf::from(path);
+
+            Ok((id, path))
+        })?;
+        let mut benchmark_paths = HashMap::new();
+        let mut working_benchmarks = HashSet::new();
+        for row in rows {
+            if let Ok((id, path)) = row {
+                benchmark_paths.insert(id, path);
+                working_benchmarks.insert(id);
+            }
+        }
+
+        println!("Finding working benchmarks for each unused function...");
+        let stmt = format!(
+            "SELECT b.data
+            FROM \"{}\" AS r
+            JOIN \"function_bitvecs\" AS b ON b.function_id = r.func_id",
+            table_name
+        );
+        let mut stmt = conn.prepare(&stmt)?;
+        let _ = stmt.query_map(params![], |row| {
+            let slice: &[u8] = row.get_ref(0)?.as_blob()?;
+            let bitvec: BitVec<u8, Msb0> = BitVec::from_slice(slice);
+            for (bench_id, bench_required) in bitvec.iter().enumerate() {
+                if !bench_required {
+                    let bench_id = bench_id + 1;
+                    working_benchmarks.remove(&bench_id);
+                }
+            }
+
+            Ok(())
+        })?;
+
+        let mut working_benchmark_paths = vec![];
+        for b_id in working_benchmarks {
+            working_benchmark_paths.push(benchmark_paths.get(&b_id).unwrap().clone());
+        }
+        Ok(working_benchmark_paths)
     }
 
     fn check_min_benches(

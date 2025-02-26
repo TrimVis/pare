@@ -29,7 +29,7 @@ enum Commands {
         path_rewrite: Option<Vec<String>>,
     },
 
-    // Finds the smallest benchmark for each removed function, for further analysis
+    /// Finds the smallest benchmark for each removed function, for further analysis
     RetrieveSmallestBenches {
         #[arg(long)]
         db: PathBuf,
@@ -40,6 +40,19 @@ enum Commands {
         // Show the x top tokens used across the smallest benchmarks
         #[arg(short, long)]
         top_tokens: Option<usize>,
+
+        /// Replaces substring in paths extracted from DB, to accomodate for a system change
+        #[arg(long, num_args = 2, value_names=vec!["FROM", "TO"])]
+        path_rewrite: Option<Vec<String>>,
+    },
+
+    /// Retrieves the set of benchmarks that should still be working according optimization result
+    RetrieveWorkingBenchmarks {
+        #[arg(long)]
+        db: PathBuf,
+
+        #[arg(short, long)]
+        p: f64,
 
         /// Replaces substring in paths extracted from DB, to accomodate for a system change
         #[arg(long, num_args = 2, value_names=vec!["FROM", "TO"])]
@@ -86,6 +99,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }) => {
             let mut analyzer = analysis::Analyzer::new(db.display().to_string(), path_rewrite);
             analyzer.analyze_smallest_benches(p, top_tokens)?;
+        }
+        Some(Commands::RetrieveWorkingBenchmarks {
+            db,
+            p,
+            path_rewrite,
+        }) => {
+            let mut analyzer = analysis::Analyzer::new(db.display().to_string(), path_rewrite);
+            analyzer.analyze_working_benches(p)?;
         }
         None => {}
     }
