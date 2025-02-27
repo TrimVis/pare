@@ -58,9 +58,9 @@ bench-creduce +SMT_FILES:
     for file in {{SMT_FILES}}; do 
         SMT_RESULT_FILE="creduce_result_$(date +%s).smt2"
         cp "$file" "$SMT_RESULT_FILE" && \
-            creduce --shaddap --not-c ./creduce/interestingness_test.sh "$SMT_RESULT_FILE" && \
-            cp "$SMT_RESULT_FILE.orig" "creduce/inputs/$SMT_RESULT_FILE" && \
-            cp "$SMT_RESULT_FILE" "creduce/results/$SMT_RESULT_FILE" && \
+            creduce --n $(nproc) --shaddap --not-c ./creduce/interestingness_test.sh "$SMT_RESULT_FILE" && \
+            mv "$SMT_RESULT_FILE.orig" "creduce/inputs/$SMT_RESULT_FILE" && \
+            mv "$SMT_RESULT_FILE" "creduce/results/$SMT_RESULT_FILE" && \
             echo && echo && echo && \
             echo "Stored minimal bench file at 'creduce/results/$SMT_RESULT_FILE' and original file at 'creduce/inputs/$SMT_RESULT_FILE'" && \
             echo "========================================================"
@@ -69,6 +69,11 @@ bench-creduce +SMT_FILES:
     echo && echo && echo
     echo "========================================================"
     echo "Stored all minimal bench files at 'creduce/results/' and original file at 'creduce/inputs/'"
+
+    echo && echo && echo
+    echo "========================================================"
+    echo "Unique results: "
+    cat creduce/results/* | sed -e 's/\s\s*/ /g' | sed -e 's/^\s*//' | sed -e 's/\s*$//' | sort | uniq
 
 download-bench:
     mkdir -p "{{benchdir}}"
