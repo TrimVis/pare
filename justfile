@@ -48,14 +48,27 @@ bench-remover: build-remover
     @echo "Removed all rarely used functions from code base"
 
 # Find minimal illegal feature example
-bench-creduce SMT_FILE:
+bench-creduce +SMT_FILES:
     #!/usr/bin/env sh
     export CVC5_TIME_LIMIT="5000"
     export CVC5_BIN="$(realpath '{{cvc5dir}}/build/bin/cvc5')"
-    echo "Running creduce on inputs '{{SMT_FILE}}' to determine minimal illegal feature (timelimit: $CVC5_TIME_LIMIT, binary: $CVC5_BIN)"
-    SMT_RESULT_FILE="creduce_result_$(date +%s).smt2"
-    cp {{SMT_FILE}} "$SMT_RESULT_FILE"
-    creduce ./creduce/interestingness_test.sh "$SMT_RESULT_FILE"
+    echo "Running creduce on files {{SMT_FILES}} to determine minimal illegal feature (timelimit: $CVC5_TIME_LIMIT, binary: $CVC5_BIN)"
+    mkdir -p "creduce/results"
+    mkdir -p "creduce/inputs"
+    for file in {{SMT_FILES}}; do 
+        SMT_RESULT_FILE="creduce_result_$(date +%s).smt2"
+        cp "$file" "$SMT_RESULT_FILE" && \
+            creduce --shaddap --not-c ./creduce/interestingness_test.sh "$SMT_RESULT_FILE" && \
+            cp "$SMT_RESULT_FILE.orig" "creduce/inputs/$SMT_RESULT_FILE" && \
+            cp "$SMT_RESULT_FILE" "creduce/results/$SMT_RESULT_FILE" && \
+            echo && echo && echo && \
+            echo "Stored minimal bench file at 'creduce/results/$SMT_RESULT_FILE' and original file at 'creduce/inputs/$SMT_RESULT_FILE'" && \
+            echo "========================================================"
+    done;
+
+    echo && echo && echo
+    echo "========================================================"
+    echo "Stored all minimal bench files at 'creduce/results/' and original file at 'creduce/inputs/'"
 
 download-bench:
     mkdir -p "{{benchdir}}"
