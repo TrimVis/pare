@@ -1,4 +1,4 @@
-use crate::args::{ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{Commands, ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::types::{
     Benchmark, FilePosition, GcovBranchResult, GcovFuncResult, GcovLineResult, ResultT,
 };
@@ -94,6 +94,14 @@ pub(super) fn res_to_bitvec(
 const CHUNK_SIZE: usize = 20;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
+    let individual_prefixes = match &ARGS.command {
+        Some(Commands::Coverage {
+            individual_prefixes,
+            ..
+        }) => *individual_prefixes,
+        _ => unreachable!("Unreachable argument combination"),
+    };
+
     let prefix_dir = match benchmark.prefix.clone() {
         None => ARGS.build_dir.clone(),
         Some(p) => p,
@@ -113,7 +121,7 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     for gcda_chunk in files.chunks(CHUNK_SIZE) {
         let mut gcno_symlinks = vec![];
         for gcda_file in gcda_chunk {
-            if ARGS.individual_prefixes {
+            if individual_prefixes {
                 let gcno_file_dst = gcda_file.to_str().unwrap();
                 let gcno_file_dst = format!("{}.gcno", &gcno_file_dst[..gcno_file_dst.len() - 5]);
                 let gcno_file_src = gcno_file_dst.strip_prefix(&prefix_dir).unwrap();
@@ -256,10 +264,14 @@ pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes, kind: MergeKind) {
 
 fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     let mut result: GcovRes = HashMap::new();
+    let no_ignore_libs = match &ARGS.command {
+        Some(Commands::Coverage { no_ignore_libs, .. }) => *no_ignore_libs,
+        _ => unreachable!("Unreachable argument combination"),
+    };
 
     for file in &json.files {
         // Ignore include files and build dir files, as we can not optimize over them anyways
-        if !ARGS.no_ignore_libs
+        if !no_ignore_libs
             && (file.file.starts_with("/usr/include")
                 || file.file.starts_with(&ARGS.build_dir.display().to_string())
                 || file

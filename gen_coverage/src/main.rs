@@ -106,9 +106,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for runners to work of the queue
     runner.join();
 
-    info!("Deleting the tmp_dir");
-    // Remove the tmp directory
-    remove_dir_all(ARGS.tmp_dir.clone().unwrap())?;
+    if let Some(args::Commands::Coverage { tmp_dir, .. }) = &ARGS.command {
+        info!("Deleting the tmp_dir");
+        // Remove the tmp directory
+        remove_dir_all(tmp_dir.clone().unwrap())?;
+    }
 
     let duration = start.elapsed();
     info!("Total time taken: {} milliseconds", duration.as_millis());

@@ -1,4 +1,4 @@
-use crate::args::{EXEC_PLACEHOLDER, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{Commands, EXEC_PLACEHOLDER, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::{ResultT, ARGS};
 
 use glob::glob;
@@ -119,13 +119,22 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
 }
 
 pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
+    let (individual_prefixes, coverage_kinds) = match &ARGS.command {
+        Some(Commands::Coverage {
+            individual_prefixes,
+            coverage_kinds,
+            ..
+        }) => (*individual_prefixes, coverage_kinds),
+        _ => unreachable!("Illegal populate_config call"),
+    };
+
     let c_insert = "INSERT INTO \"config\" (key, value) VALUES (?1, ?2)";
     tx.execute(
         &c_insert,
-        params!["individual_gcov_prefixes", ARGS.individual_prefixes],
+        params!["individual_gcov_prefixes", individual_prefixes],
     )?;
 
-    for (i, c) in ARGS.coverage_kinds.iter().enumerate() {
+    for (i, c) in coverage_kinds.iter().enumerate() {
         let k = format!("coverage_kind_{}", i);
         tx.execute(&c_insert, params![k, c.to_string()])?;
     }
@@ -187,10 +196,15 @@ pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
 
 pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
     // TODO: Readd sampling support
+    if let Some(Commands::Coverage {
+        individual_prefixes,
+        tmp_dir,
+        ..
+    }) = &ARGS.command
     {
         let mut stmt = tx.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
-        let prefix_base = ARGS.tmp_dir.as_ref().unwrap();
+        let prefix_base = tmp_dir.as_ref().unwrap();
         fs::create_dir_all(&prefix_base)
             .expect("Could not create temporary base folder for prefix files");
 
@@ -201,7 +215,7 @@ pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
         for entry in glob(&pattern).expect("Failed to read glob pattern") {
             if let Ok(file) = entry {
                 let dfile = file.canonicalize().unwrap().display().to_string();
-                let prefix = if ARGS.individual_prefixes {
+                let prefix = if *individual_prefixes {
                     let mut hasher = Sha256::new();
                     hasher.update(file.to_string_lossy().as_bytes());
                     let hash = format!("{:x}", hasher.finalize());
@@ -223,6 +237,8 @@ pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
                 stmt.execute(params![dfile, prefix])?;
             }
         }
+    } else {
+        unreachable!("Illegal populate_benchmarks call")
     }
 
     tx.commit()?;
