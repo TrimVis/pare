@@ -144,6 +144,42 @@ pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
         params!["benchmark_dir", ARGS.benchmark_dir.display().to_string()],
     )?;
 
+    let repo_path = ARGS
+        .build_dir
+        .parent()
+        .expect("Failed to change into repository root")
+        .display()
+        .to_string();
+    tx.execute(&c_insert, params!["repo_path", repo_path.as_str()])?;
+
+    let get_commit_cmd = std::process::Command::new("git")
+        .args(&["-C", repo_path.as_str(), "rev-parse", "HEAD"])
+        .output()
+        .expect("Failed to fetch git repository HEAD commit hash");
+    let commit_hash = String::from_utf8_lossy(&get_commit_cmd.stdout);
+    tx.execute(&c_insert, params!["git_commit_hash", commit_hash])?;
+
+    let get_upstreamurl_cmd = std::process::Command::new("git")
+        .args(&["-C", repo_path.as_str(), "remote", "get-url", "origin"])
+        .output()
+        .expect("Failed to fetch git repository upstream URL");
+    let upstream_url = String::from_utf8_lossy(&get_upstreamurl_cmd.stdout);
+    tx.execute(&c_insert, params!["git_upstream_url", upstream_url])?;
+
+    let get_branch_cmd = std::process::Command::new("git")
+        .args(&[
+            "-C",
+            repo_path.as_str(),
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{u}",
+        ])
+        .output()
+        .expect("Failed to fetch git repository branch name");
+    let branch = String::from_utf8_lossy(&get_branch_cmd.stdout);
+    tx.execute(&c_insert, params!["git_branch", branch])?;
+
     tx.commit()?;
 
     Ok(())
