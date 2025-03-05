@@ -106,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for runners to work of the queue
     runner.join();
 
-    if let Some(args::Commands::Coverage { tmp_dir, .. }) = &ARGS.command {
+    if let args::Commands::Coverage { tmp_dir, .. } = &ARGS.command {
         info!("Deleting the tmp_dir");
         // Remove the tmp directory
         remove_dir_all(tmp_dir.clone().unwrap())?;

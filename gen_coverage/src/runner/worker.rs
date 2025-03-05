@@ -3,6 +3,7 @@ use super::run;
 use super::ProcessingQueueMessage;
 use super::ProcessingStatusMessage;
 use super::RunnerQueueMessage;
+use crate::args::Commands;
 use crate::db::DbWriter;
 use crate::runner::gcov::merge_gcov;
 use crate::runner::gcov::res_to_bitvec;
@@ -62,7 +63,12 @@ impl Worker {
 
                         let bench_id = benchmark.id;
                         // Coverage reports are not a thing if the process didn't terminate gracefully
-                        if res_exit == 0 {
+                        // or in case we are simply running a evaluation
+                        let is_evaluation = match ARGS.command {
+                            Commands::Evaluate {} => true,
+                            _ => false,
+                        };
+                        if res_exit == 0 && !is_evaluation {
                             let start = if log::max_level() >= LevelFilter::Debug {
                                 Some(Instant::now())
                             } else {
@@ -107,7 +113,7 @@ impl Worker {
                             match processing_queue.send((benchmark.id, run_result, None)) {
                                 Ok(_) => {
                                     debug!(
-                                        "[Worker {}] Queued GCOV result (bench_id: {})",
+                                        "[Worker {}] Queued result (bench_id: {})",
                                         id, bench_id
                                     );
                                 }
@@ -147,7 +153,6 @@ impl Worker {
     ) -> Worker {
         let thread = thread::spawn(move || {
             // Db Setup
-            assert!(!ARGS.result_db.exists(), "DB file already exists.");
             let out_dir = ARGS.result_db.parent().unwrap();
             let out_dir = {
                 // Just to make sure we can canonicalize it at all
@@ -159,7 +164,12 @@ impl Worker {
             };
             create_dir_all(out_dir).unwrap();
 
-            let db = DbWriter::new(true);
+            let is_coverage = match ARGS.command {
+                Commands::Coverage { .. } => true,
+                _ => false,
+            };
+
+            let db = DbWriter::new();
             match db {
                 Ok(_) => status_sender
                     .send(ProcessingStatusMessage::DbInitSuccess)
@@ -215,10 +225,9 @@ impl Worker {
                         db.add_run_result(run_result).unwrap();
                         if let Some(gcov_result) = gcov_result {
                             debug!(
-                            "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",
-                            bench_id
-                        );
-
+                                "[DB Writer] Enqueing GCOV result for later processing (bench_id: {})",
+                                bench_id
+                            );
                             res_to_bitvec(
                                 &mut gcov_bitvec,
                                 bench_count.try_into().unwrap(),
@@ -262,7 +271,11 @@ impl Worker {
                         Some(r) => db
                             .add_gcov_measurement(r)
                             .expect("Could not add gcov measurement"),
-                        None => error!("No results to write out"),
+                        None => {
+                            if is_coverage {
+                                error!("No results to write out")
+                            }
+                        }
                     };
 
                     if log::max_level() >= LevelFilter::Debug {
@@ -282,18 +295,25 @@ impl Worker {
             }
 
             info!("[DB Writer] Cleaning up.");
-            if let Some(r) = result_buf {
-                db.add_gcov_measurement(r)
-                    .expect("Could not add gcov measurement");
-            };
-            db.add_gcov_bitvecs(gcov_bitvec)
-                .expect("Could not insert gcov bitvecs");
-            status_sender
-                .send(ProcessingStatusMessage::BenchesDone(bench_counter))
-                .expect("Could not update bench status");
 
-            db.write_to_disk()
-                .expect("Issue while writing result db to disk");
+            // Only write to disk when DB is stored in memory
+            if is_coverage {
+                if let Some(r) = result_buf {
+                    db.add_gcov_measurement(r)
+                        .expect("Could not add gcov measurement");
+                };
+                db.add_gcov_bitvecs(gcov_bitvec)
+                    .expect("Could not insert gcov bitvecs");
+                status_sender
+                    .send(ProcessingStatusMessage::BenchesDone(bench_counter))
+                    .expect("Could not update bench status");
+                db.write_to_disk()
+                    .expect("Issue while writing result db to disk");
+            } else {
+                status_sender
+                    .send(ProcessingStatusMessage::BenchesDone(bench_counter))
+                    .expect("Could not update bench status");
+            }
 
             info!("[DB Writer] Terminated.");
         });

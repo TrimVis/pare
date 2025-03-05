@@ -1,4 +1,6 @@
-use crate::args::{Commands, EXEC_PLACEHOLDER, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{
+    Commands, EXEC_PLACEHOLDER, RESULT_TABLE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES,
+};
 use crate::{ResultT, ARGS};
 
 use glob::glob;
@@ -50,14 +52,17 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
         .expect("Issue during sources table creation");
 
     // Stores the output of benchmark runs and other metadata
-    let results_table = "CREATE TABLE IF NOT EXISTS \"result_benchmarks\" (
+    let results_table = format!(
+        "CREATE TABLE IF NOT EXISTS \"{}\" (
                 id INTEGER PRIMARY KEY,
                 bench_id INTEGER NOT NULL,
                 time_ms INTEGER NOT NULL,
                 exit_code INTEGER NOT NULL,
                 stdout TEXT NOT NULL,
                 stderr TEXT NOT NULL
-            )";
+            )",
+        RESULT_TABLE_NAME.as_str()
+    );
     conn.execute(&results_table, [])
         .expect("Issue during result_benchmarks table creation");
 
@@ -120,11 +125,11 @@ pub(super) fn create_tables(conn: &Connection) -> ResultT<()> {
 
 pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
     let (individual_prefixes, coverage_kinds) = match &ARGS.command {
-        Some(Commands::Coverage {
+        Commands::Coverage {
             individual_prefixes,
             coverage_kinds,
             ..
-        }) => (*individual_prefixes, coverage_kinds),
+        } => (*individual_prefixes, coverage_kinds),
         _ => unreachable!("Illegal populate_config call"),
     };
 
@@ -148,17 +153,16 @@ pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
         params!["parsed_exec", format!("{:?}", EXEC_PLACEHOLDER)],
     )?;
 
+    let benchmark_dir = match &ARGS.command {
+        Commands::Coverage { benchmark_dir, .. } => benchmark_dir,
+        _ => unreachable!("Expected a benchmark directory for initialization"),
+    };
     tx.execute(
         &c_insert,
-        params!["benchmark_dir", ARGS.benchmark_dir.display().to_string()],
+        params!["benchmark_dir", benchmark_dir.display().to_string()],
     )?;
 
-    let repo_path = ARGS
-        .build_dir
-        .parent()
-        .expect("Failed to change into repository root")
-        .display()
-        .to_string();
+    let repo_path = ARGS.repo_dir.display().to_string();
     tx.execute(&c_insert, params!["repo_path", repo_path.as_str()])?;
 
     let get_commit_cmd = std::process::Command::new("git")
@@ -196,11 +200,11 @@ pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
 
 pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
     // TODO: Readd sampling support
-    if let Some(Commands::Coverage {
+    if let Commands::Coverage {
         individual_prefixes,
         tmp_dir,
         ..
-    }) = &ARGS.command
+    } = &ARGS.command
     {
         let mut stmt = tx.prepare("INSERT INTO \"benchmarks\" (path, prefix) VALUES (?1, ?2)")?;
 
@@ -208,7 +212,10 @@ pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
         fs::create_dir_all(&prefix_base)
             .expect("Could not create temporary base folder for prefix files");
 
-        let bench_dir = &ARGS.benchmark_dir;
+        let bench_dir = match &ARGS.command {
+            Commands::Coverage { benchmark_dir, .. } => benchmark_dir,
+            _ => unreachable!("Expected a benchmark directory"),
+        };
         let bench_dir = bench_dir.canonicalize().unwrap().display().to_string();
         let pattern = format!("{}/**/*.smt2", bench_dir);
 

@@ -26,13 +26,25 @@ tidy:
 # Generate a coverage report
 bench-measure CORES=num_cpus(): build-measure
     ./gen_coverage/target/release/gen_coverage \
-        -i -j {{CORES}} \
-        --build-dir "{{cvc5dir}}/build" \
+        -j {{CORES}} \
+        --repo "{{cvc5dir}}" \
+        --exec "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" \
+        --benchmarks "{{benchdir}}" \
         --coverage-kinds functions \
-        "{{benchdir}}" \
+        --use-prefixes \
         "{{reportsdir}}/report.sqlite" \
-        -- "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}"
+        coverage 
     @echo "Created report at '{{reportsdir}}/report.sqlite'"
+
+# Evaluate a cvc5 binary
+bench-evaluate CORES=num_cpus(): build-measure
+    ./gen_coverage/target/release/gen_coverage \
+        -j {{CORES}} \
+        --repo "{{cvc5dir}}" \
+        --exec "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" \
+        "{{reportsdir}}/report.sqlite" \
+        evaluate
+    @echo "Stored report in '{{reportsdir}}/report.sqlite'"
 
 # Find a solution to our optimization problem
 bench-optimize +P_VALUES: build-optimize

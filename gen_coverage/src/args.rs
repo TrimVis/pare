@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use mktemp::Temp;
 use once_cell::sync::Lazy;
 use std::fmt;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     fs::create_dir,
     path::{Path, PathBuf},
@@ -13,9 +14,9 @@ use crate::info;
 pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
     let mut args = CliArgs::parse();
 
-    if let Some(Commands::Coverage {
+    if let Commands::Coverage {
         ref mut tmp_dir, ..
-    }) = &mut args.command
+    } = &mut args.command
     {
         // Initialize `tmp_dir` if it hasn't been explicitly provided
         if tmp_dir.is_none() {
@@ -34,21 +35,21 @@ pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
 });
 
 pub static TRACK_FUNCS: Lazy<bool> = Lazy::new(|| {
-    if let Some(Commands::Coverage { coverage_kinds, .. }) = &ARGS.command {
+    if let Commands::Coverage { coverage_kinds, .. } = &ARGS.command {
         coverage_kinds.contains(&CoverageKind::Functions)
     } else {
         false
     }
 });
 pub static TRACK_LINES: Lazy<bool> = Lazy::new(|| {
-    if let Some(Commands::Coverage { coverage_kinds, .. }) = &ARGS.command {
+    if let Commands::Coverage { coverage_kinds, .. } = &ARGS.command {
         coverage_kinds.contains(&CoverageKind::Lines)
     } else {
         false
     }
 });
 pub static TRACK_BRANCHES: Lazy<bool> = Lazy::new(|| {
-    if let Some(Commands::Coverage { coverage_kinds, .. }) = &ARGS.command {
+    if let Commands::Coverage { coverage_kinds, .. } = &ARGS.command {
         coverage_kinds.contains(&CoverageKind::Branches)
     } else {
         false
@@ -60,6 +61,17 @@ pub static EXEC_PLACEHOLDER: Lazy<Vec<String>> = Lazy::new(|| {
         "Could not find '{{}}' in exec arg, use this as a placeholder for the benchmark file argument"
     );
     shellwords::split(&ARGS.exec).expect("Could not parse executable command")
+});
+pub static RESULT_TABLE_NAME: Lazy<String> = Lazy::new(|| {
+    if let Commands::Evaluate { .. } = &ARGS.command {
+        let start = SystemTime::now();
+        let epoch_time = start
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
+        format!("evaluation_benchmarks_{}", epoch_time.as_millis())
+    } else {
+        "result_benchmarks".to_string()
+    }
 });
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
@@ -105,9 +117,9 @@ impl fmt::Display for CoverageKind {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None, name = "Benchmark coverage script")]
 pub struct CliArgs {
-    /// Build directory
-    #[arg(short, long)]
-    pub build_dir: PathBuf,
+    /// Repository directory
+    #[arg(long = "repo")]
+    pub repo_dir: PathBuf,
 
     /// Number of parallel jobs
     #[arg(short = 'j', long, default_value_t = 1)]
@@ -121,17 +133,15 @@ pub struct CliArgs {
     #[arg(long, default_value = "./output.log")]
     pub log_file: PathBuf,
 
-    /// Benchmark directory
-    pub benchmark_dir: PathBuf,
+    /// Executable (with args) to call
+    #[arg(short, long)]
+    pub exec: String,
 
     /// Database which will contain the benchmark results
     pub result_db: PathBuf,
 
-    /// Executable (with args) to call
-    pub exec: String,
-
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
@@ -142,13 +152,14 @@ pub enum Commands {
         #[arg(
             short = 'k',
             long,
-            default_value = "functions,branches,lines",
+            // default_value = "functions,branches,lines",
+            default_value = "functions",
             value_delimiter = ','
         )]
         coverage_kinds: Vec<CoverageKind>,
 
         /// Use individual GCOV prefixes for each run
-        #[arg(short, long, action = clap::ArgAction::SetTrue)]
+        #[arg(short='p', long="use-prefixes", action = clap::ArgAction::SetTrue)]
         individual_prefixes: bool,
 
         /// Don't filter out outside libraries from coverage analysis
@@ -158,8 +169,12 @@ pub enum Commands {
         // Temporary directory where the GCOV outputs are stored
         #[arg(long, default_value = None)]
         tmp_dir: Option<PathBuf>,
+
+        #[arg(short,long="benchmarks", default_value = None)]
+        /// Benchmark directory
+        benchmark_dir: PathBuf,
     },
 
     /// Benchmark evaluation script.
-    Evaluation {},
+    Evaluate {},
 }

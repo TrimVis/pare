@@ -1,5 +1,5 @@
 mod init;
-use crate::args::{TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{Commands, RESULT_TABLE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
 use crate::runner::{GcovBitvec, GcovRes};
 use crate::types::{Benchmark, BenchmarkRun};
 use crate::{ResultT, ARGS};
@@ -18,18 +18,41 @@ pub struct DbWriter {
 }
 
 impl DbWriter {
-    pub fn new(init: bool) -> ResultT<Self> {
+    pub fn new() -> ResultT<Self> {
+        let is_coverage = match ARGS.command {
+            Commands::Coverage { .. } => true,
+            _ => false,
+        };
+        assert!(
+            !is_coverage || !ARGS.result_db.exists(),
+            "DB file already exists... Coverage command will create a new DB!"
+        );
         let mut conn = Connection::open_with_flags(
-            MEMORY_CONN_URI,
-            OpenFlags::SQLITE_OPEN_URI
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_READ_WRITE,
+            if is_coverage {
+                MEMORY_CONN_URI.to_string()
+            } else {
+                ARGS.result_db.canonicalize()?.display().to_string()
+            },
+            if is_coverage {
+                OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_CREATE
+                    | OpenFlags::SQLITE_OPEN_READ_WRITE
+            } else {
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+            },
+            // MEMORY_CONN_URI,
+            // OpenFlags::SQLITE_OPEN_URI
+            //     | OpenFlags::SQLITE_OPEN_CREATE
+            //     | OpenFlags::SQLITE_OPEN_READ_WRITE,
         )?;
-        if init {
-            info!("Configuring database...");
-            init::prepare(&conn).expect("Issue during table preparation");
-            info!("Creating tables...");
-            init::create_tables(&conn).expect("Issue during table creation");
+
+        info!("Configuring database...");
+        init::prepare(&conn).expect("Issue during table preparation");
+        info!("Creating tables...");
+        init::create_tables(&conn).expect("Issue during table creation");
+
+        // Only populate benchmark and config tables when running initial coverage reports
+        if is_coverage {
             info!("Populating config table...");
             init::populate_config(conn.transaction()?)
                 .expect("Issue during config table population");
@@ -73,17 +96,19 @@ impl DbWriter {
     }
 
     pub fn add_run_result(&mut self, run_result: BenchmarkRun) -> ResultT<()> {
-        let mut stmt_insert_runresult = self
-            .conn
-            .prepare_cached(
-                "INSERT INTO \"result_benchmarks\" (
+        let query = format!(
+            "INSERT INTO \"{}\" (
                 bench_id,
                 time_ms,
                 exit_code,
                 stdout,
                 stderr
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            )
+            RESULT_TABLE_NAME.as_str()
+        );
+        let mut stmt_insert_runresult = self
+            .conn
+            .prepare_cached(query.as_str())
             .expect("Issue during benchmark status update query preparation");
         stmt_insert_runresult
             .execute(params![

@@ -95,15 +95,15 @@ const CHUNK_SIZE: usize = 20;
 
 pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
     let individual_prefixes = match &ARGS.command {
-        Some(Commands::Coverage {
+        Commands::Coverage {
             individual_prefixes,
             ..
-        }) => *individual_prefixes,
+        } => *individual_prefixes,
         _ => unreachable!("Unreachable argument combination"),
     };
 
     let prefix_dir = match benchmark.prefix.clone() {
-        None => ARGS.build_dir.clone(),
+        None => ARGS.repo_dir.clone().join("build/"),
         Some(p) => p,
     }
     .display()
@@ -265,18 +265,19 @@ pub fn merge_gcov(res0: &mut GcovRes, res1: GcovRes, kind: MergeKind) {
 fn interpret_gcov(json: &GcovJson) -> ResultT<GcovRes> {
     let mut result: GcovRes = HashMap::new();
     let no_ignore_libs = match &ARGS.command {
-        Some(Commands::Coverage { no_ignore_libs, .. }) => *no_ignore_libs,
+        Commands::Coverage { no_ignore_libs, .. } => *no_ignore_libs,
         _ => unreachable!("Unreachable argument combination"),
     };
 
     for file in &json.files {
         // Ignore include files and build dir files, as we can not optimize over them anyways
+        let build_dir = &ARGS.repo_dir.join("build/");
         if !no_ignore_libs
             && (file.file.starts_with("/usr/include")
-                || file.file.starts_with(&ARGS.build_dir.display().to_string())
+                || file.file.starts_with(&build_dir.display().to_string())
                 || file
                     .file
-                    .starts_with(&ARGS.build_dir.canonicalize()?.display().to_string()))
+                    .starts_with(&build_dir.canonicalize()?.display().to_string()))
         {
             continue;
         }
