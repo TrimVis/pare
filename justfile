@@ -23,17 +23,18 @@ tidy:
     rm -rf /tmp/coverage_reports
     cd "{{cvc5dir}}/build" && make coverage-reset
 
-# Generate a coverage report
-bench-measure CORES=num_cpus(): build-measure
+# Generate a coverage report, use TRACK_UNUSED carefully, it significantly increases DB size and runtime
+bench-measure CORES=num_cpus() TRACK_UNUSED="false": build-measure
     ./gen_coverage/target/release/gen_coverage \
         -j {{CORES}} \
         --repo "{{cvc5dir}}" \
         --exec "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" \
-        --benchmarks "{{benchdir}}/**/*.smt2" \
-        --coverage-kinds functions \
-        --use-prefixes \
         "{{reportsdir}}/report.sqlite" \
-        coverage 
+        coverage \
+        --benchmarks "{{benchdir}}/**/*.smt2" \
+        --track-all {{TRACK_UNUSED}} \
+        --coverage-kinds functions \
+        --use-prefixes
     @echo "Created report at '{{reportsdir}}/report.sqlite'"
 
 # Evaluate a cvc5 binary
