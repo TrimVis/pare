@@ -65,7 +65,7 @@ impl Worker {
                         // Coverage reports are not a thing if the process didn't terminate gracefully
                         // or in case we are simply running a evaluation
                         let is_evaluation = match ARGS.command {
-                            Commands::Evaluate {} => true,
+                            Commands::Evaluate { .. } => true,
                             _ => false,
                         };
                         if res_exit == 0 && !is_evaluation {

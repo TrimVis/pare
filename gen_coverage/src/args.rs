@@ -63,12 +63,16 @@ pub static EXEC_PLACEHOLDER: Lazy<Vec<String>> = Lazy::new(|| {
     shellwords::split(&ARGS.exec).expect("Could not parse executable command")
 });
 pub static RESULT_TABLE_NAME: Lazy<String> = Lazy::new(|| {
-    if let Commands::Evaluate { .. } = &ARGS.command {
+    if let Commands::Evaluate { id } = &ARGS.command {
         let start = SystemTime::now();
         let epoch_time = start
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
-        format!("evaluation_benchmarks_{}", epoch_time.as_millis())
+        if let Some(id) = id {
+            format!("evaluation_benchmarks_{}_{}", id, epoch_time.as_millis())
+        } else {
+            format!("evaluation_benchmarks_{}", epoch_time.as_millis())
+        }
     } else {
         "result_benchmarks".to_string()
     }
@@ -176,5 +180,9 @@ pub enum Commands {
     },
 
     /// Benchmark evaluation script.
-    Evaluate {},
+    Evaluate {
+        #[arg(long, default_value = None)]
+        /// ID used in table name to easily identify the result table
+        id: Option<String>,
+    },
 }
