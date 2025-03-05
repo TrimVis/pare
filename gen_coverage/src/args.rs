@@ -34,6 +34,14 @@ pub static ARGS: Lazy<CliArgs> = Lazy::new(|| {
     args
 });
 
+pub static TRACK_UNUSED: Lazy<bool> = Lazy::new(|| {
+    if let Commands::Coverage { track_all, .. } = &ARGS.command {
+        track_all.unwrap_or(false)
+    } else {
+        false
+    }
+});
+
 pub static TRACK_FUNCS: Lazy<bool> = Lazy::new(|| {
     if let Commands::Coverage { coverage_kinds, .. } = &ARGS.command {
         coverage_kinds.contains(&CoverageKind::Functions)
@@ -170,13 +178,18 @@ pub enum Commands {
         #[arg(long, action = clap::ArgAction::SetTrue)]
         no_ignore_libs: bool,
 
-        // Temporary directory where the GCOV outputs are stored
+        /// Temporary directory where the GCOV outputs are stored
         #[arg(long, default_value = None)]
         tmp_dir: Option<PathBuf>,
 
-        #[arg(short,long="benchmarks", default_value = None)]
-        /// Benchmark directory
-        benchmark_dir: PathBuf,
+        /// Also track unused functions (use carefully, significantly increases DB size)
+        #[arg(long, default_value = None)]
+        track_all: Option<bool>,
+
+        /// Benchmark file pattern, must contain a path to the benchmark directory,
+        /// followed by a pattern e.g. /home/user/benchmarks/non-incremental/**/*.smt2
+        #[arg(short, long)]
+        benchmarks: String,
     },
 
     /// Benchmark evaluation script.

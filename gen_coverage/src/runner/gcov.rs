@@ -1,4 +1,4 @@
-use crate::args::{Commands, ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{Commands, ARGS, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES, TRACK_UNUSED};
 use crate::types::{
     Benchmark, FilePosition, GcovBranchResult, GcovFuncResult, GcovLineResult, ResultT,
 };

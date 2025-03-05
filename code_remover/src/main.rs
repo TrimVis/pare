@@ -5,6 +5,7 @@ mod remover_config;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use remover::FunctionKind;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -61,6 +62,9 @@ enum Commands {
 
     /// Remove the functions that have been determined as unneccessary by our optimization step
     Remove {
+        #[arg(long)]
+        remove_unused: Option<bool>,
+
         #[arg(short, long)]
         config: PathBuf,
 
@@ -73,9 +77,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Remove { config, no_change }) => {
+        Some(Commands::Remove {
+            config,
+            no_change,
+            remove_unused,
+        }) => {
             let mut remover = remover::Remover::new(config);
-            remover.remove(no_change.unwrap_or(true))?;
+            remover.remove(
+                no_change.unwrap_or(true),
+                remove_unused.map_or(FunctionKind::RarelyUsed, |remove_unused| {
+                    if remove_unused {
+                        println!("[WARN] This feature requires the data aggregation phase flag \"--track-all\" ");
+                        FunctionKind::Unused
+                    } else {
+                        FunctionKind::RarelyUsed
+                    }
+                }),
+            )?;
         }
         Some(Commands::VisualizeFunctionRanges {
             db,

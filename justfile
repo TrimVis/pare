@@ -29,7 +29,7 @@ bench-measure CORES=num_cpus(): build-measure
         -j {{CORES}} \
         --repo "{{cvc5dir}}" \
         --exec "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" \
-        --benchmarks "{{benchdir}}" \
+        --benchmarks "{{benchdir}}/**/*.smt2" \
         --coverage-kinds functions \
         --use-prefixes \
         "{{reportsdir}}/report.sqlite" \

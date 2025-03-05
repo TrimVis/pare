@@ -43,8 +43,13 @@ struct Stats {
 
 pub struct Remover {
     config: Config,
-
     stats: Stats,
+}
+
+pub enum FunctionKind {
+    Unused,
+    RarelyUsed,
+    All,
 }
 
 impl Remover {
@@ -76,8 +81,12 @@ impl Remover {
         }
     }
 
-    pub fn remove(&mut self, no_change: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let file_map = self.get_rarely_used_functions(true)?;
+    pub fn remove(
+        &mut self,
+        no_change: bool,
+        usage_kind: FunctionKind,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let file_map = self.get_rarely_used_functions(usage_kind)?;
         let rarely_used = self.find_function_ranges(file_map)?;
 
         for (file, line_ranges) in rarely_used {
@@ -110,14 +119,22 @@ impl Remover {
 
     pub fn get_rarely_used_functions(
         &self,
-        rarely_used: bool,
+        usage_kind: FunctionKind,
     ) -> Result<HashMap<PathBuf, Vec<FunctionRange>>, Box<dyn std::error::Error>> {
         let conn = self.config.connect_to_db()?;
         let table_name = self.config.get_table_name()?;
         println!("[INFO] Table name: {}", table_name);
 
-        let stmt = if rarely_used {
-            format!(
+        let stmt = match usage_kind {
+            FunctionKind::Unused => {
+                "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
+                FROM \"functions\" AS f
+                JOIN \"sources\" AS s ON s.id = f.source_id
+                WHERE f.benchmark_usage_count = 0
+                ORDER BY s.path, f.start_line"
+                    .to_string()
+            }
+            FunctionKind::RarelyUsed => format!(
                 "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
                 FROM \"functions\" AS f
                 JOIN \"sources\" AS s ON s.id = f.source_id
@@ -125,13 +142,14 @@ impl Remover {
                 WHERE u.use_function = 0
                 ORDER BY s.path, f.start_line",
                 table_name
-            )
-        } else {
-            "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
+            ),
+            FunctionKind::All => {
+                "SELECT s.path, f.name, f.start_line, f.start_col, f.end_line, f.end_col
                 FROM \"functions\" AS f
                 JOIN \"sources\" AS s ON s.id = f.source_id
                 ORDER BY s.path, f.start_line"
-                .to_string()
+                    .to_string()
+            }
         };
         let mut stmt = conn.prepare(&stmt)?;
         let rows = stmt.query_map(params![], |row| {

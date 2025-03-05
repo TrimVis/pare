@@ -1,5 +1,7 @@
 mod init;
-use crate::args::{Commands, RESULT_TABLE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES};
+use crate::args::{
+    Commands, RESULT_TABLE_NAME, TRACK_BRANCHES, TRACK_FUNCS, TRACK_LINES, TRACK_UNUSED,
+};
 use crate::runner::{GcovBitvec, GcovRes};
 use crate::types::{Benchmark, BenchmarkRun};
 use crate::{ResultT, ARGS};
@@ -235,13 +237,14 @@ impl DbWriter {
             }
         }
 
-        // 2. Track usage data of all (used) functions
+        // 2. Track usage data of all (used & if wanted unused) functions
+        let track_unused = TRACK_UNUSED.clone();
         if TRACK_FUNCS.clone() {
             for (file, (funcs, _, _)) in &run_result {
                 let sid = srcid_file_map.get(file).unwrap();
                 for chunk in &funcs
                     .values()
-                    .filter(|f| f.borrow().usage > 0)
+                    .filter(|f| track_unused || f.borrow().usage > 0)
                     .chunks(INSERT_BATCH_SIZE)
                 {
                     let mut batch_query = String::new();
@@ -282,7 +285,7 @@ impl DbWriter {
                 let sid = srcid_file_map.get(file).unwrap();
                 for chunk in &lines
                     .values()
-                    .filter(|l| l.borrow().usage > 0)
+                    .filter(|l| track_unused || l.borrow().usage > 0)
                     .chunks(INSERT_BATCH_SIZE)
                 {
                     let mut batch_query = String::new();

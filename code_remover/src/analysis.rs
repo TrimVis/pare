@@ -8,7 +8,7 @@ use std::fs::{self};
 use std::io::BufRead;
 use std::path::PathBuf;
 
-use crate::remover::{FunctionRange, Remover};
+use crate::remover::{FunctionKind, FunctionRange, Remover};
 use crate::remover_config::Config;
 
 const DEBUG: bool = false;
@@ -35,7 +35,7 @@ impl Analyzer {
         &mut self,
     ) -> Result<Vec<(PathBuf, Vec<(FunctionRange, FunctionRange)>)>, Box<dyn std::error::Error>>
     {
-        let file_map = self.remover.get_rarely_used_functions(false)?;
+        let file_map = self.remover.get_rarely_used_functions(FunctionKind::All)?;
         let function_ranges = self.remover.find_function_ranges(file_map)?;
 
         Ok(function_ranges)

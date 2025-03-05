@@ -153,14 +153,11 @@ pub(super) fn populate_config(tx: Transaction) -> ResultT<()> {
         params!["parsed_exec", format!("{:?}", EXEC_PLACEHOLDER)],
     )?;
 
-    let benchmark_dir = match &ARGS.command {
-        Commands::Coverage { benchmark_dir, .. } => benchmark_dir,
+    let benchmark_pattern = match &ARGS.command {
+        Commands::Coverage { benchmarks, .. } => benchmarks,
         _ => unreachable!("Expected a benchmark directory for initialization"),
     };
-    tx.execute(
-        &c_insert,
-        params!["benchmark_dir", benchmark_dir.display().to_string()],
-    )?;
+    tx.execute(&c_insert, params!["benchmark_pattern", benchmark_pattern])?;
 
     let repo_path = ARGS.repo_dir.display().to_string();
     tx.execute(&c_insert, params!["repo_path", repo_path.as_str()])?;
@@ -212,12 +209,10 @@ pub(super) fn populate_benchmarks(tx: Transaction) -> ResultT<()> {
         fs::create_dir_all(&prefix_base)
             .expect("Could not create temporary base folder for prefix files");
 
-        let bench_dir = match &ARGS.command {
-            Commands::Coverage { benchmark_dir, .. } => benchmark_dir,
+        let pattern = match &ARGS.command {
+            Commands::Coverage { benchmarks, .. } => benchmarks,
             _ => unreachable!("Expected a benchmark directory"),
         };
-        let bench_dir = bench_dir.canonicalize().unwrap().display().to_string();
-        let pattern = format!("{}/**/*.smt2", bench_dir);
 
         for entry in glob(&pattern).expect("Failed to read glob pattern") {
             if let Ok(file) = entry {
