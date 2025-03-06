@@ -14,7 +14,7 @@ use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::remove_file;
+use std::fs::{remove_dir_all, remove_file};
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::symlink;
 use std::process::{exit, Command};
@@ -182,22 +182,27 @@ pub(super) fn process(benchmark: &Benchmark) -> GcovRes {
         }
 
         // Delete the gcda file gcno file if it was symlinked
-        for gcda_file in gcda_chunk {
-            remove_file(gcda_file)
-                .unwrap_or_else(|e| error!("Could not remove gcda file: {:?}", e));
-        }
-        for gcno_symlink in gcno_symlinks {
-            remove_file(gcno_symlink)
-                .unwrap_or_else(|e| error!("Could not remove symlink: {:?}", e));
+        if individual_prefixes {
+            for gcda_file in gcda_chunk {
+                remove_file(gcda_file)
+                    .unwrap_or_else(|e| error!("Could not remove gcda file: {:?}", e));
+            }
+            for gcno_symlink in gcno_symlinks {
+                remove_file(gcno_symlink)
+                    .unwrap_or_else(|e| error!("Could not remove symlink: {:?}", e));
+            }
         }
     }
 
-    if ires.is_some() {
-        ires.unwrap()
-    } else {
+    if individual_prefixes {
+        remove_dir_all(prefix_dir)
+            .unwrap_or_else(|e| error!("Could not clean up prefix folder: {:?}", e));
+    }
+
+    ires.unwrap_or_else(|| {
         error!("No result created...");
         HashMap::new()
-    }
+    })
 }
 
 #[derive(PartialEq)]
