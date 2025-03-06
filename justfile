@@ -105,6 +105,10 @@ build-cvc5: setup-cvc5
     cd {{cvc5dir}} && ./configure.sh debug --auto-download --pyvenv --coverage --poly --cocoa --gpl
     cd "{{cvc5dir}}/build" && make -j $(nproc)
 
+build-cvc5-release: setup-cvc5
+    cd {{cvc5dir}} && ./configure.sh release --auto-download --pyvenv --poly --cocoa --gpl
+    cd "{{cvc5dir}}/build" && make -j $(nproc)
+
 build-remover: setup-rust
     cd "code_remover" && CARGO_HOME="../{{cargo_env}}" RUSTFLAGS='-C target-cpu=native' ../{{cargo}} build --release
 
