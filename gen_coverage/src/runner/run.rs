@@ -1,4 +1,4 @@
-use crate::args::EXEC_PLACEHOLDER;
+use crate::args::{Commands, ARGS, EXEC_PLACEHOLDER};
 use crate::types::{Benchmark, BenchmarkRun};
 
 use log::{error, info};
@@ -11,8 +11,16 @@ pub(super) fn process(benchmark: &Benchmark) -> Option<BenchmarkRun> {
     // Assumes that the full path is always passed
     let exec = PathBuf::from(&EXEC_PLACEHOLDER[0]);
     let cmd = &mut Command::new(&exec);
-    if let Some(prefix) = &benchmark.prefix {
-        cmd.env("GCOV_PREFIX", prefix.display().to_string());
+    match ARGS.command {
+        Commands::Coverage {
+            individual_prefixes,
+            ..
+        } if individual_prefixes => {
+            if let Some(prefix) = &benchmark.prefix {
+                cmd.env("GCOV_PREFIX", prefix.display().to_string());
+            }
+        }
+        _ => {}
     }
     // Replace {} in our template args with the file
     let args = EXEC_PLACEHOLDER[1..].iter().map(|c| {
