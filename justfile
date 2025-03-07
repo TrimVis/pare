@@ -23,29 +23,29 @@ tidy:
     rm -rf /tmp/coverage_reports
     cd "{{cvc5dir}}/build" && make coverage-reset
 
-# Generate a coverage report, use TRACK_UNUSED carefully, it significantly increases DB size and runtime
-bench-measure CORES=num_cpus() TRACK_UNUSED="false": build-measure
+# Generate a coverage report, use TRACK_UNUSED only if needed, it significantly increases the resulting DB size
+bench-measure CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXEC="{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" TRACK_UNUSED="false": build-measure
     ./gen_coverage/target/release/gen_coverage \
         -j {{CORES}} \
         --repo "{{cvc5dir}}" \
-        --exec "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" \
-        "{{reportsdir}}/report.sqlite" \
+        --exec "{{EXEC}}" \
+        "{{DB_FILE}}" \
         coverage \
         --benchmarks "{{benchdir}}/**/*.smt2" \
         --track-all {{TRACK_UNUSED}} \
         --coverage-kinds functions \
         --use-prefixes
-    @echo "Created report at '{{reportsdir}}/report.sqlite'"
+    @echo "Created report at '{{DB_FILE}}'"
 
 # Evaluate a cvc5 binary
-bench-evaluate CORES=num_cpus(): build-measure
+bench-evaluate CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXEC="{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}": build-measure
     ./gen_coverage/target/release/gen_coverage \
         -j {{CORES}} \
         --repo "{{cvc5dir}}" \
-        --exec "{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" \
-        "{{reportsdir}}/report.sqlite" \
-        evaluate
-    @echo "Stored report in '{{reportsdir}}/report.sqlite'"
+        --exec "{{EXEC}}" \
+        "{{DB_FILE}}" \
+        evaluate                                                                                                               
+    @echo "Stored report in '{{DB_FILE}}'"
 
 # Find a solution to our optimization problem
 bench-optimize +P_VALUES: build-optimize
