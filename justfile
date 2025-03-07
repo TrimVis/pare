@@ -38,13 +38,14 @@ bench-measure CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXEC="{{cv
     @echo "Created report at '{{DB_FILE}}'"
 
 # Evaluate a cvc5 binary
-bench-evaluate CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXEC="{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}": build-measure
+bench-evaluate ID="" CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXEC="{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}": build-measure
     ./gen_coverage/target/release/gen_coverage \
         -j {{CORES}} \
         --repo "{{cvc5dir}}" \
         --exec "{{EXEC}}" \
         "{{DB_FILE}}" \
-        evaluate                                                                                                               
+        evaluate \
+        --id ""
     @echo "Stored report in '{{DB_FILE}}'"
 
 # Find a solution to our optimization problem
@@ -66,18 +67,18 @@ bench-creduce +SMT_FILES:
     export CVC5_TIME_LIMIT="5000"
     export CVC5_BIN="$(realpath '{{cvc5dir}}/build/bin/cvc5')"
     echo "Running creduce on files {{SMT_FILES}} to determine minimal illegal feature (timelimit: $CVC5_TIME_LIMIT, binary: $CVC5_BIN)"
-    mkdir -p "creduce/results"
-    mkdir -p "creduce/inputs"
-    mkdir -p "creduce/curr"
+    mkdir -p "creduce/results" "creduce/inputs" "creduce/curr"
     for file in {{SMT_FILES}}; do 
         SMT_RESULT_FILE="bench_reduced_$(date +%s).smt2"
-        cp "$file" "creduce/curr/$SMT_RESULT_FILE" && \
-            creduce --n $(nproc) --shaddap --not-c ./creduce/interestingness_test.sh "creduce/curr/$SMT_RESULT_FILE" && \
-            mv "creduce/curr/$SMT_RESULT_FILE.orig" "creduce/inputs/$SMT_RESULT_FILE" && \
-            mv "creduce/curr/$SMT_RESULT_FILE" "creduce/results/$SMT_RESULT_FILE" && \
-            echo && echo && echo && \
-            echo "Stored minimal bench file at 'creduce/results/$SMT_RESULT_FILE' and original file at 'creduce/inputs/$SMT_RESULT_FILE'" && \
-            echo "========================================================"
+        cp "$file" "creduce/curr/$SMT_RESULT_FILE";
+        cd "creduce/curr";
+        creduce --n $(nproc) --shaddap --not-c ../interestingness_test.sh "$SMT_RESULT_FILE" && \
+        mv "$SMT_RESULT_FILE.orig" "../inputs/$SMT_RESULT_FILE" && \
+        mv "$SMT_RESULT_FILE" "../results/$SMT_RESULT_FILE" && \
+        echo && echo && echo && \
+        echo "Stored minimal bench file at 'creduce/results/$SMT_RESULT_FILE' and original file at 'creduce/inputs/$SMT_RESULT_FILE'" && \
+        echo "========================================================";
+        cd ../..;
     done;
 
     echo && echo && echo
