@@ -68,12 +68,13 @@ bench-creduce +SMT_FILES:
     echo "Running creduce on files {{SMT_FILES}} to determine minimal illegal feature (timelimit: $CVC5_TIME_LIMIT, binary: $CVC5_BIN)"
     mkdir -p "creduce/results"
     mkdir -p "creduce/inputs"
+    mkdir -p "creduce/curr"
     for file in {{SMT_FILES}}; do 
-        SMT_RESULT_FILE="creduce_result_$(date +%s).smt2"
-        cp "$file" "$SMT_RESULT_FILE" && \
-            creduce --n $(nproc) --shaddap --not-c ./creduce/interestingness_test.sh "$SMT_RESULT_FILE" && \
-            mv "$SMT_RESULT_FILE.orig" "creduce/inputs/$SMT_RESULT_FILE" && \
-            mv "$SMT_RESULT_FILE" "creduce/results/$SMT_RESULT_FILE" && \
+        SMT_RESULT_FILE="bench_reduced_$(date +%s).smt2"
+        cp "$file" "creduce/curr/$SMT_RESULT_FILE" && \
+            creduce --n $(nproc) --shaddap --not-c ./creduce/interestingness_test.sh "creduce/curr/$SMT_RESULT_FILE" && \
+            mv "creduce/curr/$SMT_RESULT_FILE.orig" "creduce/inputs/$SMT_RESULT_FILE" && \
+            mv "creduce/curr/$SMT_RESULT_FILE" "creduce/results/$SMT_RESULT_FILE" && \
             echo && echo && echo && \
             echo "Stored minimal bench file at 'creduce/results/$SMT_RESULT_FILE' and original file at 'creduce/inputs/$SMT_RESULT_FILE'" && \
             echo "========================================================"
@@ -87,6 +88,10 @@ bench-creduce +SMT_FILES:
     echo "========================================================"
     echo "Unique results: "
     cat creduce/results/* | sed -e 's/\s\s*/ /g' | sed -e 's/^\s*//' | sed -e 's/\s*$//' | sort | uniq
+
+bench-creduce-results:
+    for f in creduce/results/*; do echo; echo "==================================="; echo "$f:"; cat $f; echo "----------------"; ../cvc5-repo/build/bin/cvc5 $f ; done
+
 
 download-bench:
     mkdir -p "{{benchdir}}"
