@@ -45,7 +45,7 @@ bench-evaluate ID="" CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXE
         --exec "{{EXEC}}" \
         "{{DB_FILE}}" \
         evaluate \
-        --id ""
+        --id "{{ID}}"
     @echo "Stored report in '{{DB_FILE}}'"
 
 # Find a solution to our optimization problem

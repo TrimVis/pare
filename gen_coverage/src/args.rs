@@ -76,10 +76,13 @@ pub static RESULT_TABLE_NAME: Lazy<String> = Lazy::new(|| {
         let epoch_time = start
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
-        if let Some(id) = id {
-            format!("evaluation_benchmarks_{}_{}", id, epoch_time.as_millis())
-        } else {
-            format!("evaluation_benchmarks_{}", epoch_time.as_millis())
+        match id {
+            Some(v) if v != "" => {
+                format!("evaluation_benchmarks_{}_{}", v, epoch_time.as_millis())
+            }
+            _ => {
+                format!("evaluation_benchmarks_{}", epoch_time.as_millis())
+            }
         }
     } else {
         "result_benchmarks".to_string()
