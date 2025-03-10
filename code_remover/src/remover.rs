@@ -166,32 +166,22 @@ impl Remover {
         // Aggregate query results into file_map, which groups the functions by files
         let file_map: HashMap<PathBuf, Vec<FunctionRange>> = {
             let mut result_map: HashMap<PathBuf, Vec<FunctionRange>> = HashMap::new();
-            let mut curr_path: PathBuf = PathBuf::new();
-            let mut curr_funcs: Vec<FunctionRange> = Vec::new();
             for row in rows {
                 if let Ok((path, name, start_line, start_col, end_line, end_col)) = row {
                     let path = PathBuf::from(path);
-                    if curr_funcs.is_empty() {
-                        curr_path = path.clone();
-                    }
-
-                    if curr_path != path {
-                        result_map.insert(curr_path, curr_funcs);
-                        curr_funcs = Vec::new();
-                        curr_path = PathBuf::new();
+                    let curr_func = FunctionRange {
+                        name,
+                        start_line,
+                        start_col,
+                        end_line,
+                        end_col,
+                    };
+                    if let Some(funcs) = result_map.get_mut(&path) {
+                        funcs.push(curr_func)
                     } else {
-                        curr_funcs.push(FunctionRange {
-                            name,
-                            start_line,
-                            start_col,
-                            end_line,
-                            end_col,
-                        })
+                        result_map.insert(path, vec![curr_func]);
                     }
                 }
-            }
-            if curr_funcs.len() > 0 {
-                result_map.insert(curr_path, curr_funcs);
             }
 
             result_map
