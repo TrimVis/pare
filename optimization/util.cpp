@@ -154,7 +154,9 @@ std::vector<std::string> get_bench_stats_from_db(std::string db_file) {
   }
 
   sqlite3_stmt *stmt;
-  const char *query = "SELECT id, path FROM benchmarks ORDER BY id";
+  const char *query =
+      "SELECT b.id, b.path FROM benchmarks AS b JOIN result_benchmarks AS r ON "
+      "r.bench_id = b.id WHERE r.exit_code = 0 ORDER BY b.id";
   rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
@@ -165,7 +167,7 @@ std::vector<std::string> get_bench_stats_from_db(std::string db_file) {
   bench_names.push_back("");
   for (int i = 1; (rc = sqlite3_step(stmt)) == SQLITE_ROW; i++) {
     int id = sqlite3_column_int(stmt, 0);
-    assert(id == i && "Out of order bench id!");
+    // assert(id == i && "Out of order bench id!");
     std::string path =
         reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
     bench_names.push_back(path);

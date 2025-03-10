@@ -58,7 +58,7 @@ evaluate_solution_file(std::string &filename) {
       }
 
       if (static_cast<size_t>(idx) >= arrays[arrName].size()) {
-        arrays[arrName].resize(idx + 1, 0.0);
+        arrays[arrName].resize(idx + 10);
       }
       arrays[arrName][idx] = value;
     } else {
@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
     // Total code length after optimization
     double total_length_after = 0.0;
     for (int i = 0; i < func_ids.size(); ++i) {
-      total_length_after += func_lens[i] * func_used[i];
+      total_length_after += func_lens[i] * func_used[func_ids[i]];
     }
     std::cout << "\tafter optimization: " << total_length_after << std::endl;
 
@@ -128,10 +128,10 @@ int main(int argc, char *argv[]) {
     double lhs = 0.0;
     double sum_functions = 0.0;
     for (int i = 0; i < func_ids.size(); ++i) {
-      sum_functions += func_used[i];
+      sum_functions += func_used[func_ids[i]];
     }
     for (int i = 0; i < bench_ids.size(); ++i) {
-      lhs += bench_used[i];
+      lhs += bench_used[bench_ids[i]];
     }
     std::cout << "No functions in use: " << sum_functions << std::endl;
     std::cout << "No working benchmarks: " << lhs << std::endl;
@@ -143,7 +143,7 @@ int main(int argc, char *argv[]) {
     std::map<std::string, std::tuple<int, int>> rel_theory_working;
     for (int j = 0; j < bench_ids.size(); j++) {
       int bench_id = bench_ids[j];
-      std::string path = bench_names[bench_id];
+      std::string path = bench_names[j];
 
       // Extract the theory name
       std::string marker = "/non-incremental/";
@@ -159,7 +159,7 @@ int main(int argc, char *argv[]) {
                                : path.substr(pos);
 
       // Update the map entry
-      int working = bench_used[j];
+      int working = bench_used[bench_id];
       int total = 1;
       if (auto elem = rel_theory_working.find(theory);
           elem != rel_theory_working.end()) {
@@ -174,10 +174,13 @@ int main(int argc, char *argv[]) {
     for (auto theory_elem : rel_theory_working) {
       std::string theory_name = theory_elem.first + ":";
       theory_name.resize(15, ' ');
+      int abs_notworking =
+          std::get<1>(theory_elem.second) - std::get<0>(theory_elem.second);
       int percentage = 100.0 * (double)std::get<0>(theory_elem.second) /
                        (double)std::get<1>(theory_elem.second);
-      std::cout << theory_name << percentage << "%\t";
-      if (count % 5 == 0) {
+      std::cout << theory_name << percentage << "% (-" << abs_notworking
+                << ")\t";
+      if (count % 1 == 0) {
         std::cout << std::endl;
       }
       count++;
