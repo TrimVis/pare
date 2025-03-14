@@ -23,6 +23,9 @@ tidy:
     rm -rf /tmp/coverage_reports
     cd "{{cvc5dir}}/build" && make coverage-reset
 
+clean:
+    cd "{{cvc5dir}}/build" && make clean
+
 # Generate a coverage report, use TRACK_UNUSED only if needed, it significantly increases the resulting DB size
 bench-measure CORES=num_cpus() DB_FILE="{{reportsdir}}/report.sqlite" EXEC="{{cvc5dir}}/build/bin/cvc5 --tlimit 5000 {}" TRACK_UNUSED="false": build-measure
     ./gen_coverage/target/release/gen_coverage \
@@ -109,6 +112,10 @@ download-bench:
 # Clones and builds cvc5 with coverage support
 build-cvc5: setup-cvc5
     cd {{cvc5dir}} && ./configure.sh debug --auto-download --pyvenv --coverage --poly --cocoa --gpl
+    cd "{{cvc5dir}}/build" && make -j $(nproc)
+
+build-cvc5-debug: setup-cvc5
+    cd {{cvc5dir}} && ./configure.sh debug --auto-download --pyvenv --poly --cocoa --gpl
     cd "{{cvc5dir}}/build" && make -j $(nproc)
 
 build-cvc5-production: setup-cvc5

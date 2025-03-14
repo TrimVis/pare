@@ -59,22 +59,42 @@ def main():
     # Build and print LaTeX commands, sorted by theory name
     output_lines = []
     legend_lines = []
+    group_sum = sum([sum([x[1] for x in theory])
+                    for theory in global_groups.values()])
+    misc_theory = {}
+
     for theory in sorted(global_groups.keys()):
         if all([x[1] == 0 for x in global_groups[theory]]):
             continue
 
-        iout = []
-        iout.append(
-            r"\addplot+[style=" + theory + "style] coordinates {")
-        for x, y in global_groups[theory]:
-            iout.append("(" + str(x) + ", " + str(y) + ")")
-        iout.append("};")
-        output_lines.append(" ".join(iout))
-        if any([x[1] >= 500 for x in global_groups[theory]]):
-            legend_lines.append(theory)
+        # Only include important groups, and the rest push into misc style
+        if sum([x[1] for x in global_groups[theory]]) / group_sum > 0.02:
+            iout = []
+            iout.append(
+                r"\addplot+[style=" + theory + "style] coordinates {")
+            for x, y in global_groups[theory]:
+                iout.append("(" + str(x) + ", " + str(y) + ")")
+            iout.append("};")
+            output_lines.append(" ".join(iout))
+            legend_lines.append(theory.replace("_", "\\_"))
+        else:
+            for x, y in global_groups[theory]:
+                misc_theory[x] = (misc_theory.get(x) or 0) + y
+
+    # Append misc style
+    misc_theory = sorted(
+        [(x, y) for (x, y) in misc_theory.items()], key=lambda tup: tup[0])
+    iout = []
+    iout.append(
+        r"\addplot+[style=MISCstyle] coordinates {")
+    for x, y in misc_theory:
+        iout.append("(" + str(x) + ", " + str(y) + ")")
+    iout.append("};")
+    output_lines.append(" ".join(iout))
+    legend_lines.append("MISC")
 
     print("\n".join(output_lines))
-    print("\n\n\\legend{" + ",".join(legend_lines) + "}")
+    print("\n\n\\legend{" + ", ".join(legend_lines) + "}")
 
 
 if __name__ == "__main__":

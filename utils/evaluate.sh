@@ -32,6 +32,7 @@ for P in "$@"; do
 
     echo "Returning to workingd directory for build..."
     cd "$CURR_DIR"
+    ./just clean
     ./just build-cvc5-production
     echo "Starting evaluation" 
     # ./just bench-evaluate "$P" 190 ./reports/report_eval.sqlite

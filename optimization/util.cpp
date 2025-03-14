@@ -232,11 +232,30 @@ void get_function_stats_from_db(std::string db_file,
     std::vector<bool> func_usage(bench_ids.size(), false);
 
     int usage_count = 0;
+    int last_used_id = 0;
     for (int i = 0; i < bench_ids.size(); i++) {
       uint64_t byte = (bench_ids[i] - 1) / 8;
       uint64_t bit_offset = 7 - ((bench_ids[i] - 1) % 8);
       func_usage[i] = (func_usage_data[byte] >> bit_offset) & 1;
       usage_count += func_usage[i];
+      if (func_usage[i]) {
+        if (func_id == 6147) {
+          std::cout << "'" << func_usage[i] << "'" << std::endl;
+          std::cout << "'" << func_usage_data[byte] << "'" << std::endl;
+          std::cout << "'" << *((uint8_t *)usage_blob + byte) << "'"
+                    << std::endl;
+          std::cout << bit_offset << "    " << byte << std::endl;
+        }
+        last_used_id = i;
+      }
+    }
+
+    if (func_id == 6147) {
+      std::cout << "Function ID: " << func_id << std::endl;
+      std::cout << "Start and End: " << start_line << " -- " << end_line
+                << std::endl;
+      std::cout << "USAGE: " << usage_count << " at ID " << last_used_id
+                << std::endl;
     }
 
     // Ignore functions that are unused or required by all benchmarks

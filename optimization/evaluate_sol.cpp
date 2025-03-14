@@ -6,11 +6,11 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sqlite3.h>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 std::map<std::string, std::vector<double>>
@@ -70,21 +70,68 @@ evaluate_solution_file(std::string &filename) {
   return arrays;
 }
 
+std::vector<bool> get_evaluation_data(std::string &db_file,
+                                      std::string &table_name) {
+  std::vector<bool> eval_result;
+  sqlite3 *db;
+  int rc = sqlite3_open(db_file.c_str(), &db);
+  if (rc) {
+    std::cerr << "Can't open database: " << sqlite3_errmsg(db) << std::endl;
+    exit(1);
+  }
+
+  sqlite3_stmt *stmt;
+  std::string query =
+      "select r.bench_id, (e.stdout not like '%Unsupported%') as \"supported\""
+      " from result_benchmarks as r"
+      " join \"" +
+      table_name +
+      "\" as e ON e.bench_id = r.bench_id"
+      " order by r.bench_id;";
+  std::cout << query << std::endl;
+  rc = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    std::cerr << "Failed to execute query: " << sqlite3_errmsg(db) << std::endl;
+    sqlite3_close(db);
+    exit(1);
+  }
+
+  eval_result.push_back(false);
+  for (int i = 1; (rc = sqlite3_step(stmt)) == SQLITE_ROW; i++) {
+    int id = sqlite3_column_int(stmt, 0);
+    // assert(id == i && "Out of order bench id!");
+    eval_result.push_back(!!sqlite3_column_double(stmt, 1));
+  }
+  sqlite3_finalize(stmt);
+
+  sqlite3_close(db);
+
+  return eval_result;
+}
+
 int main(int argc, char *argv[]) {
   std::string db_file = "./reports/report.sqlite";
+  std::optional<std::string> eval_table = {};
+  bool exec_cvc5 = false;
 
   int opt;
-  while ((opt = getopt(argc, argv, "d:")) != -1) {
+  while ((opt = getopt(argc, argv, "d:e:c")) != -1) {
     switch (opt) {
     case 'd':
       db_file = optarg;
+      break;
+    case 'e':
+      eval_table = optarg;
+      break;
+    case 'c':
+      exec_cvc5 = true;
       break;
     case 'h':
     case '?':
     default:
       std::cout << "Help/Usage Example\n"
                 << argv[0]
-                << " -d <DB_PATH> <SOL-FILE> "
+                << " -d <DB_PATH> -e <EVAL_TABLE_NAME> [-c] <SOL-FILE> "
                    "[<ADD-SOL-FILES>...]"
                 << std::endl;
       exit(0);
@@ -96,8 +143,13 @@ int main(int argc, char *argv[]) {
   std::vector<int> func_ids;
   std::vector<int> func_lens;
   std::vector<std::vector<bool>> func_usages;
+  std::optional<std::vector<bool>> eval_data = {};
   get_function_stats_from_db(db_file, bench_ids, func_ids, func_lens,
                              func_usages, {});
+  if (eval_table.has_value()) {
+    std::cout << " |>> Extracting evaluation data from DB" << std::endl;
+    eval_data = get_evaluation_data(db_file, eval_table.value());
+  }
 
   for (int i = optind; i < argc; i++) {
     auto filename = std::string(argv[i]);
@@ -186,6 +238,40 @@ int main(int argc, char *argv[]) {
       count++;
     }
     std::cout << std::endl;
+
+    if (eval_data.has_value()) {
+      int overall_success = 0;
+      int overall_wrong = 0;
+      for (int j = 0; j < bench_ids.size(); j++) {
+        int id = bench_ids[j];
+        if (eval_data.value()[id] != bench_used[id]) {
+          // Actually run this benchmark just to be sure
+
+          std::cout << "Sanity check, executing benchmark..." << std::endl;
+          std::string command =
+              "../cvc5-repo/build/bin/cvc5 --timeout 5000 " + bench_names[j];
+          int result = std::system(command.c_str());
+
+          if (result != 0 && result != 1) {
+            overall_wrong += 1;
+            std::cout << "Expected benchmark (id:  " << id << ") "
+                      << bench_names[j] << " to "
+                      << (bench_used[id] ? "terminate successfully" : "fail")
+                      << ", but it did not!" << std::endl;
+
+            std::cout << "Expected: " << bench_used[id]
+                      << "; Evaluation Result: " << eval_data.value()[id]
+                      << "; Execution Result: " << (result == 0 || result == 1)
+                      << std::endl;
+          } else {
+            overall_success += 1;
+          }
+        }
+      }
+      std::cout << "Reported errorneous benchmarks:"
+                << "\n\t without Errors: \t " << overall_success
+                << "\n\t with Errors: \t " << overall_wrong << std::endl;
+    }
 
     // Some line breaks so we have clearer borders
     if (i < argc - 1) {
