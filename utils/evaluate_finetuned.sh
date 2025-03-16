@@ -27,7 +27,7 @@ for P in "$@"; do
     export P
 
     git restore .
-    BRANCH="debloated/$P"
+    BRANCH="finetuned/$P"
     echo "Checking out $BRANCH..."
     git checkout "$BRANCH"
 
@@ -37,7 +37,7 @@ for P in "$@"; do
     ./just build-cvc5-production
     echo "Starting evaluation" 
     # ./just bench-evaluate "$P" 190 ./reports/report_eval.sqlite
-    ./just bench-evaluate "$P" 190 ./reports/report_eval.sqlite "../cvc5-repo/build/bin/cvc5 --tlimit 5000 {}"
+    ./just bench-evaluate "finetuned_$P" 190 ./reports/report_eval.sqlite "../cvc5-repo/build/bin/cvc5 --tlimit 5000 {}"
     cd "$REPO_DIR"
 
 done

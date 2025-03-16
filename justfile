@@ -12,8 +12,12 @@ cargo_env := ".cargo"
 
 alias b := build
 alias m := bench-measure
+alias a := bench-measure
 alias o := bench-optimize
 alias r := bench-remover
+alias e := bench-evaluate
+
+
 
 build: build-cvc5 build-remover build-measure build-optimize
     
